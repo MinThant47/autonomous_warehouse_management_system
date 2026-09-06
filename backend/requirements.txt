@@ -1,0 +1,10 @@
+flask
+flask-cors
+waitress
+numpy
+pandas
+networkx
+joblib
+xgboost
+matplotlib
+paho-mqtt
