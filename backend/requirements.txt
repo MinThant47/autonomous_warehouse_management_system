@@ -8,3 +8,7 @@ joblib
 xgboost
 matplotlib
 paho-mqtt
+requests
+opencv-python
+ultralytics
+onnxruntime

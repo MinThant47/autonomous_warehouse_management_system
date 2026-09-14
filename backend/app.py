@@ -1,5 +1,7 @@
 import json
+import os
 from queue import Empty
+
 from flask import Flask, Response, request, jsonify, stream_with_context
 from flask_cors import CORS
 from waitress import serve
@@ -229,5 +231,9 @@ if __name__=="__main__":
     serve(
         app,
         host="0.0.0.0",
-        port=8000
+        port=8000,
+        # Each MJPEG camera feed is a long-lived response and occupies a
+        # Waitress worker. Leave enough workers for both feeds, robot events,
+        # and normal warehouse API requests.
+        threads=int(os.environ.get("WAITRESS_THREADS", "16")),
     )
