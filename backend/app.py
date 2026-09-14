@@ -5,7 +5,7 @@ from flask_cors import CORS
 from waitress import serve
 from scheduler.scheduler import dispatch_task, robot_state, robots, update_robot_node
 from new_warehouse_map import edges, nodes
-from mqtt_gateway import start_mqtt_gateway
+from realtime_mqtt_gateway import start_realtime_mqtt_gateway
 from robot_events import publish_robot_state, subscribe, unsubscribe
 from warehouse_tasks import create_inbound_warehouse_task, tasks
 from database.database import (
@@ -225,7 +225,7 @@ def robot_events():
 
 
 if __name__=="__main__":
-    start_mqtt_gateway()
+    start_realtime_mqtt_gateway()
     serve(
         app,
         host="0.0.0.0",
