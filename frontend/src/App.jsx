@@ -77,6 +77,9 @@ function App() {
           </div>
           <div className="header-meta">
             <span className={error ? "connection offline" : "connection"}><i />{error || "Live MQTT connection"}</span>
+            <a className="object-detection-link" href="http://localhost:8001/">
+              Object Detection
+            </a>
           </div>
         </div>
         {activeSidebarTab === "warehouse" ? (
