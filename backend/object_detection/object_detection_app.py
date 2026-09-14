@@ -794,66 +794,66 @@ INDEX_HTML = """
 <head>
     <title>ESP32-CAM Live Object Detection</title>
     <style>
-        /* box-sizing: border-box makes width/padding math simpler --
-           padding no longer adds to an element's declared width. */
         * { box-sizing: border-box; }
         body {
-            background: #111; color: #eee; font-family: system-ui, sans-serif;
-            text-align: center; margin: 0; padding: 1.5rem;
+            margin: 0; min-height: 100vh; padding: 24px clamp(24px, 3vw, 46px);
+            background: #f2f5fa; color: #172033;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
-        h1 { font-weight: 500; margin-bottom: 1.5rem; font-size: clamp(1.3rem, 4vw, 2rem); }
-
-        /* .grid holds all camera boxes side by side, wrapping onto a
-           new row automatically if the screen is too narrow to fit
-           them (this is what makes it responsive on phones). */
-        .grid { display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center; align-items: flex-start; }
+        .page-shell { max-width: 1280px; margin: 0 auto; }
+        .panel-heading { display: flex; justify-content: space-between; gap: 24px; align-items: center; margin-bottom: 22px; }
+        .eyebrow { margin: 0 0 2px; color: #3973df; text-transform: uppercase; letter-spacing: .11em; font-size: 10px; font-weight: 800; }
+        h1 { margin: 0; color: #172033; font-size: clamp(26px, 4vw, 30px); letter-spacing: -.04em; font-weight: 500; }
+        .header-actions { display: flex; align-items: center; gap: 10px; }
+        .live-status { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #cae8d7; border-radius: 999px; background: #f0fdf4; color: #167344; font-size: 12px; font-weight: 700; white-space: nowrap; }
+        .live-status i { width: 7px; height: 7px; border-radius: 50%; background: #25a867; box-shadow: 0 0 0 3px #d9f5e4; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; align-items: start; }
 
         .camera-box {
-            display: flex; flex-direction: column; align-items: center;
-            /* flex: 0 1 420px means: don't grow past content (0),
-               DO shrink if needed (1), and the "natural" target size
-               is 420px. Combined with max-width/min-width, this keeps
-               each camera a reasonable, consistent size on desktop
-               while still shrinking gracefully on small screens. */
-            flex: 0 1 420px; max-width: 420px; min-width: 280px;
+            min-width: 0; padding: 16px; border: 1px solid #e5eaf2; border-radius: 14px;
+            background: #fff; box-shadow: 0 8px 24px #21314b0d;
         }
         .camera-box h2 {
-            font-weight: 400; font-size: 1rem; color: #aaa; margin-bottom: 0.5rem;
-            text-transform: uppercase; letter-spacing: 0.05em;
+            margin: 0 0 12px; color: #25324a; font-size: 14px; font-weight: 800;
+            text-transform: uppercase; letter-spacing: .06em;
         }
-        /* width: 100% makes the <img> (which is really the MJPEG
-           stream) fill its container's width, scaling proportionally. */
-        img { width: 100%; height: auto; display: block; border: 4px solid #333; border-radius: 6px; }
+        img { width: 100%; height: auto; display: block; border: 1px solid #d7dfeb; border-radius: 9px; background: #172033; }
 
-        /* The red obstacle-warning banner. Hidden by default
-           (display: none); JS below toggles the "active" class on/off
-           based on what the /api/obstacle endpoint reports. */
         .warning-banner {
-            margin-top: 0.75rem; padding: 0.6rem 1rem; border-radius: 6px;
-            background: #7a1f1f; color: #fff; font-weight: 600; font-size: 0.95rem;
+            margin-top: 12px; padding: 9px 11px; border: 1px solid #ffcaca; border-radius: 7px;
+            background: #fff0f0; color: #b42318; font-weight: 800; font-size: 12px;
             display: none; width: 100%;
         }
         .warning-banner.active { display: block; }
         .back-link {
-            display: inline-block; margin-bottom: 1.25rem; padding: 0.55rem 0.85rem;
-            border: 1px solid #555; border-radius: 6px; color: #fff; text-decoration: none;
-            background: #252525; font-weight: 600;
+            padding: 7px 10px; border-radius: 6px; background: #172f62; color: #fff;
+            font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap;
         }
-        .back-link:hover { background: #363636; }
+        .back-link:hover { background: #0f2450; }
+        @media (max-width: 650px) {
+            body { padding: 20px; }
+            .panel-heading { align-items: flex-start; flex-direction: column; }
+        }
     </style>
 </head>
 <body>
-    <a class="back-link" href="{{ website_url }}">&larr; Back to warehouse website</a>
-    <h1>ESP32-CAM Live Object Detection</h1>
-    <div class="grid">
+    <main class="page-shell">
+    <header class="panel-heading">
+        <div>
+            <p class="eyebrow">Live vision monitor</p>
+            <h1>Robots' Live View</h1>
+        </div>
+        <div class="header-actions">
+            <span class="live-status"><i></i>Camera service active</span>
+            <a class="back-link" href="{{ website_url }}">Back to warehouse</a>
+        </div>
+    </header>
+    <section class="grid">
         {% for camera in cameras %}
         <div class="camera-box">
             <h2>{{ camera.name }}</h2>
-            <!-- This <img> tag's src points at our MJPEG streaming
-                 route. Browsers understand multipart MJPEG responses
-                 natively -- an <img> tag showing an MJPEG stream just
-                 continuously updates itself as new frames arrive,
-                 there's no special JavaScript needed to "play" it. -->
+            <!-- The page refreshes this image with the newest annotated
+                 snapshot, which works reliably with the Waitress server. -->
             <img
                 id="feed-{{ camera.name }}"
                 src="{{ url_for('object_detection.camera_snapshot', camera_name=camera.name) }}"
@@ -867,7 +867,8 @@ INDEX_HTML = """
             </div>
         </div>
         {% endfor %}
-    </div>
+    </section>
+    </main>
     <script>
         // Build a plain JS list of camera names from the Jinja2
         // `cameras` list, so the polling loop below knows which
