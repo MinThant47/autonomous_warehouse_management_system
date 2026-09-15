@@ -1,4 +1,4 @@
-"""Small in-process event bus for live robot-monitor updates."""
+"""Small in-process event bus for live dashboard updates."""
 from queue import Queue
 from threading import Lock
 
@@ -20,9 +20,28 @@ def unsubscribe(subscriber):
 
 def publish_robot_state(state):
     """Notify every connected dashboard without blocking MQTT processing."""
+    _publish({"event": "robot-state", "data": state})
+
+
+def publish_warehouse_alert(message, serial_code=None):
+    """Notify dashboards of duplicate-item and full-shelf inbound failures."""
+    if "already in inventory" in message:
+        alert_type = "duplicate-item"
+    elif "No empty shelf is available" in message:
+        alert_type = "shelf-full"
+    else:
+        return
+    _publish({
+        "event": "warehouse-alert",
+        "data": {"type": alert_type, "message": message, "serial_code": serial_code},
+    })
+
+
+def _publish(event):
+    """Deliver an event to every dashboard without blocking MQTT processing."""
     with _lock:
         subscribers = list(_subscribers)
     for subscriber in subscribers:
         if subscriber.full():
             subscriber.get_nowait()
-        subscriber.put_nowait(state)
+        subscriber.put_nowait(event)

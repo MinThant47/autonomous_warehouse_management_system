@@ -8,7 +8,7 @@ from waitress import serve
 from scheduler.scheduler import dispatch_task, robot_state, robots, update_robot_node
 from new_warehouse_map import edges, nodes
 from realtime_mqtt_gateway import start_realtime_mqtt_gateway
-from robot_events import publish_robot_state, subscribe, unsubscribe
+from robot_events import publish_robot_state, publish_warehouse_alert, subscribe, unsubscribe
 from warehouse_tasks import create_inbound_warehouse_task, tasks
 from database.database import (
     WarehouseDatabaseError,
@@ -95,6 +95,7 @@ def create_inbound_task():
         )
         publish_robot_state(result["robot_state"])
     except WarehouseDatabaseError as error:
+        publish_warehouse_alert(str(error), data.get("serial_code"))
         return jsonify({"error": str(error)}), 400
 
     return jsonify({
@@ -211,8 +212,8 @@ def robot_events():
             yield "retry: 1000\n\n"
             while True:
                 try:
-                    state = subscriber.get(timeout=20)
-                    yield f"event: robot-state\ndata: {json.dumps(state)}\n\n"
+                    event = subscriber.get(timeout=20)
+                    yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
                 except Empty:
                     yield ": keepalive\n\n"
         finally:

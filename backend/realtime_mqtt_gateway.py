@@ -11,7 +11,7 @@ import os
 
 from rfid_node_map import resolve_node_id
 from realtime_navigation import NodeCommandPlanner
-from robot_events import publish_robot_state
+from robot_events import publish_robot_state, publish_warehouse_alert
 from scheduler.scheduler import robots, update_robot_node
 from warehouse_tasks import create_inbound_warehouse_task
 
@@ -117,6 +117,8 @@ def start_realtime_mqtt_gateway():
             LOG.info("%s reached %s; sent %s", robot_id, node_id, command["action"])
         except (UnicodeDecodeError, ValueError) as error:
             LOG.warning("Ignoring MQTT message on %s: %s", message.topic, error)
+            if message.topic.split("/")[-1] == "inbound":
+                publish_warehouse_alert(str(error))
 
     client.on_connect = on_connect
     client.on_message = on_message
