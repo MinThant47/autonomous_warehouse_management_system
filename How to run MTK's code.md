@@ -59,3 +59,18 @@ MQTT works ဖို့ Firewall မှာ inbound port လုပ်ရမယ်
 - **Crucial:** You must restart the Mosquitto service for this to take effect. Press the **Windows Key**, type `Services`, press **Enter**, find **Mosquitto Broker** in the list, right-click it, and select **Restart**.
 
 [[_Thesis]]
+
+
+Git
+======
+How to create new branch?
+git switch -c <branch-name>
+This creates the branch and switches to it immediately.
+
+How to push the new branch to GitHub?
+git push -u origin <branch-name>
+
+How to merge with main branch?
+git checkout main
+git merge <branch_name>
+git push origin main

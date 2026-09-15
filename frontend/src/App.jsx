@@ -10,6 +10,7 @@ function App() {
   const [warehouse, setWarehouse] = useState(null);
   const [warehouseError, setWarehouseError] = useState("");
   const [activeSidebarTab, setActiveSidebarTab] = useState("monitor");
+  const [warehouseAlert, setWarehouseAlert] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -62,6 +63,13 @@ function App() {
       const robot = JSON.parse(event.data);
       setRobots((current) => ({ ...current, [robot.robot_id]: robot }));
       setError("");
+    });
+    events.addEventListener("warehouse-alert", (event) => {
+      const alert = JSON.parse(event.data);
+      setWarehouseAlert({
+        title: alert.type === "duplicate-item" ? "Item already stored" : "Shelf capacity reached",
+        message: alert.message,
+      });
     });
     events.onerror = () => setError("Live connection lost — retrying…");
     return () => events.close();
@@ -141,6 +149,18 @@ function App() {
           <WarehouseLogFeed warehouse={warehouse} error={warehouseError} />
         ) : <TaskForm />}
       </aside>
+      {warehouseAlert && (
+        <div className="alert-backdrop" role="presentation">
+          <section className="warehouse-alert-dialog" role="alertdialog" aria-modal="true" aria-labelledby="warehouse-alert-title" aria-describedby="warehouse-alert-message">
+            <div className="alert-icon" aria-hidden="true">!</div>
+            <div>
+              <h2 id="warehouse-alert-title">{warehouseAlert.title}</h2>
+              <p id="warehouse-alert-message">{warehouseAlert.message}</p>
+            </div>
+            <button type="button" autoFocus onClick={() => setWarehouseAlert(null)}>OK</button>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
