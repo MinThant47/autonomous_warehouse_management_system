@@ -88,6 +88,9 @@ function App() {
             <a className="object-detection-link" href="http://localhost:8001/">
               Live View
             </a>
+            <a className="qr-scanner-link" href="http://esp32camqr.local/">
+              QR Scanner View
+            </a>
           </div>
         </div>
         {activeSidebarTab === "warehouse" ? (
