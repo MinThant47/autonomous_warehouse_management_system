@@ -4,7 +4,8 @@ vscode cmd prompt မှာ
 cd frontend
 npm run dev
 
-http://localhost:5173/ ကို browser မှာဖွင့်
+ဒီ computer ရဲ့ IP ကိုရှာပြီး `http://<computer-ip>:5173/` ကို browser မှာဖွင့်။
+တခြား device တွေကလည်း ဒီ URL နဲ့ဝင်နိုင်တယ်။
 
 ##### Backend Run
 powershell နဲ့ ဒါတွေတစ်ကြောင်းစီ  run
@@ -18,11 +19,10 @@ python app.py
 "only for mac"
 MQTT_ENABLED=true MQTT_HOST=localhost WAITRESS_THREADS=20 python app.py
 
-##### Camera Vision Run
-vscode cmd prompt မှာ
+##### Camera Vision
 
-cd backend
-waitress-serve --host=0.0.0.0 --port=8001 --threads=20 --call object_detection.object_detection_app:create_object_detection_app
+Camera Vision က Backend Waitress server ထဲမှာပဲ run ပါတယ်။ Separate terminal နဲ့
+port 8001 ကို run စရာမလိုပါ။ `http://<computer-ip>:8000/object-detection/` ကိုဖွင့်ပါ။
 
 
 `mosquitto_pub -h localhost -t agv/R1/node -m '{"node_id":"B7C53F5"}'
@@ -74,3 +74,6 @@ How to merge with main branch?
 git checkout main
 git merge <branch_name>
 git push origin main
+
+How to restore to latest commit?
+git reset --hard HEAD

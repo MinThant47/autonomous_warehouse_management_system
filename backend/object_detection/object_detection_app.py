@@ -38,11 +38,12 @@ panel (usually under "DHCP" -> "Address Reservation" / "Static Leases").
 Without a reservation, the router could hand the camera a different IP
 next time it reconnects, and the fallback value below would go stale.
 
-Run with:
-    python object_detection/object_detection_app.py
-or, for real concurrent multi-viewer support (recommended):
-    pip install waitress
-    waitress-serve --host=0.0.0.0 --port=8001 --threads=20 --call object_detection.object_detection_app:create_object_detection_app
+Run as part of the main warehouse server (recommended):
+    MQTT_ENABLED=true MQTT_HOST=localhost WAITRESS_THREADS=20 python app.py
+    # Open http://<computer-ip>:8000/object-detection/
+
+The standalone application below remains available only for isolated camera
+testing.  In normal use, do not start a second Waitress process on port 8001.
 """
 
 # ------------------------------ IMPORTS ------------------------------
@@ -1005,8 +1006,8 @@ def obstacle_status(camera_name):
     request to this URL from wherever their code runs; they never need
     to see or touch any of the Python/OpenCV/YOLO code above this line.
 
-    Example:
-        GET http://<this-PC-IP>:8000/api/obstacle/cam1
+    When mounted by the warehouse server:
+        GET http://<this-PC-IP>:8000/object-detection/api/obstacle/cam1
 
     Example response:
         {
@@ -1031,8 +1032,8 @@ def obstacle_status_all():
     consumer needs to check every robot's camera at once instead of
     making a separate request per camera.
 
-    Example:
-        GET http://<this-PC-IP>:8000/api/obstacle
+    When mounted by the warehouse server:
+        GET http://<this-PC-IP>:8000/object-detection/api/obstacle
 
     Example response:
         {

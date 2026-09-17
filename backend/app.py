@@ -2,9 +2,16 @@ import json
 import os
 from queue import Empty
 
+# macOS can load OpenMP through both the ML scheduler dependencies and
+# OpenCV/ONNX dependencies.  Set this before importing either stack so the
+# server does not abort during startup.  This is a compatibility workaround;
+# the production fix is keeping all ML packages linked to one OpenMP runtime.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 from flask import Flask, Response, request, jsonify, stream_with_context
 from flask_cors import CORS
 from waitress import serve
+from object_detection.object_detection_app import object_detection_bp
 from scheduler.scheduler import dispatch_task, robot_state, robots, update_robot_node
 from new_warehouse_map import edges, nodes
 from realtime_mqtt_gateway import start_realtime_mqtt_gateway
@@ -26,6 +33,10 @@ from database.seed import seed_shelves
 app = Flask(__name__)
 
 CORS(app)
+
+# The camera UI and its API now run in this same Flask application and are
+# served by the same Waitress process as the warehouse API.
+app.register_blueprint(object_detection_bp, url_prefix="/object-detection")
 
 # Creates the local database and its storage locations.  The database module
 # remains independent from Flask, scheduler, MQTT, and robot state.
