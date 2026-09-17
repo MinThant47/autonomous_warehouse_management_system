@@ -85,7 +85,7 @@ function App() {
           </div>
           <div className="header-meta">
             <span className={error ? "connection offline" : "connection"}><i />{error || "Live MQTT connection"}</span>
-            <a className="object-detection-link" href="http://localhost:8001/">
+            <a className="object-detection-link" href={`http://${window.location.hostname || "localhost"}:8000/object-detection/`}>
               Live View
             </a>
             <a className="qr-scanner-link" href="http://esp32camqr.local/">
