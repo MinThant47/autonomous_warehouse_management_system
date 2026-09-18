@@ -66,8 +66,13 @@ function App() {
     });
     events.addEventListener("warehouse-alert", (event) => {
       const alert = JSON.parse(event.data);
+      const alertTitles = {
+        "duplicate-item": "Item already stored",
+        "shelf-full": "Shelf capacity reached",
+        "unrecognized-qr": "Unrecognized QR code",
+      };
       setWarehouseAlert({
-        title: alert.type === "duplicate-item" ? "Item already stored" : "Shelf capacity reached",
+        title: alertTitles[alert.type] || "Warehouse alert",
         message: alert.message,
       });
     });

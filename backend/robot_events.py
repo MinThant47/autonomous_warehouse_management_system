@@ -24,11 +24,13 @@ def publish_robot_state(state):
 
 
 def publish_warehouse_alert(message, serial_code=None):
-    """Notify dashboards of duplicate-item and full-shelf inbound failures."""
+    """Notify dashboards when an inbound QR report cannot create a task."""
     if "already in inventory" in message:
         alert_type = "duplicate-item"
     elif "No empty shelf is available" in message:
         alert_type = "shelf-full"
+    elif "does not exist" in message:
+        alert_type = "unrecognized-qr"
     else:
         return
     _publish({

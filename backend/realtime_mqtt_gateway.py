@@ -118,7 +118,7 @@ def start_realtime_mqtt_gateway():
         except (UnicodeDecodeError, ValueError) as error:
             LOG.warning("Ignoring MQTT message on %s: %s", message.topic, error)
             if message.topic.split("/")[-1] == "inbound":
-                publish_warehouse_alert(str(error))
+                publish_warehouse_alert(str(error), locals().get("serial_code"))
 
     client.on_connect = on_connect
     client.on_message = on_message
