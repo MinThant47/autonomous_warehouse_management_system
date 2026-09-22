@@ -148,6 +148,11 @@ function App() {
                     <div><dt>Payload</dt><dd>{robot.has_payload ? "Loaded" : "Empty"}</dd></div>
                     <div><dt>Queue</dt><dd>{robot.queue_length} task{robot.queue_length === 1 ? "" : "s"}</dd></div>
                   </dl>
+                  <p className={`node-report ${robot.last_update_source === "mqtt-virtual-arrival" ? "virtual-arrival" : ""}`}>
+                    {robot.last_update_source === "mqtt-virtual-arrival"
+                      ? `Virtual line-end arrival confirmed at ${robot.node}`
+                      : `Last node report: ${robot.last_update_source || "unavailable"}`}
+                  </p>
                   <RobotQueue tasks={robot.queue} currentTaskId={robot.current_task_id} robotId={robot.robot_id} />
                 </article>
               ))}

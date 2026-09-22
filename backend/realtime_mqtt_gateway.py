@@ -25,20 +25,22 @@ def _robot_id_from_topic(topic):
     return parts[1] if len(parts) == 3 and parts[0] == "agv" else None
 
 
-def _node_id_from_payload(payload):
+def _node_report_from_payload(payload):
+    """Resolve a node report and identify a physical or virtual arrival."""
     text = payload.decode("utf-8").strip()
     if not text:
         raise ValueError("Empty MQTT payload")
     try:
         decoded = json.loads(text)
     except json.JSONDecodeError:
-        return resolve_node_id(text)
+        return resolve_node_id(text), "mqtt-rfid"
     if not isinstance(decoded, dict):
         raise ValueError("JSON node payload must be an object")
     identifier = decoded.get("rfid_id", decoded.get("rfid", decoded.get("node_id", decoded.get("node"))))
     if not isinstance(identifier, str) or not identifier.strip():
         raise ValueError("Node payload requires a non-empty RFID ID or node ID")
-    return resolve_node_id(identifier)
+    source = "mqtt-virtual-arrival" if decoded.get("event") == "line_end_arrival" else "mqtt-rfid"
+    return resolve_node_id(identifier), source
 
 
 def _inbound_details_from_payload(payload):
@@ -102,8 +104,8 @@ def start_realtime_mqtt_gateway():
                 publish_robot_state(result["robot_state"])
                 return
 
-            node_id = _node_id_from_payload(message.payload)
-            state = update_robot_node(robot_id, node_id, source="mqtt-rfid")
+            node_id, report_source = _node_report_from_payload(message.payload)
+            state = update_robot_node(robot_id, node_id, source=report_source)
             goal = _task_goal(robot_id)
             command = (
                 COMMAND_PLANNER.command_for_node(robot_id, node_id, goal)
