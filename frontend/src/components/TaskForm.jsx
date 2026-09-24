@@ -9,6 +9,7 @@ function TaskForm() {
   const [shelves, setShelves] = useState([]);
   const [inventoryItems, setInventoryItems] = useState([]);
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     Promise.all([API.get("/warehouse/shelves"), API.get("/warehouse/inventory")])
@@ -20,6 +21,7 @@ function TaskForm() {
   }, []);
 
   const submit = async (route, payload) => {
+    setSubmitting(true);
     try {
       const { data } = await API.post(route, payload);
       setMessage(data.message);
@@ -31,6 +33,8 @@ function TaskForm() {
       setInventoryItems(inventoryResponse.data);
     } catch (error) {
       setMessage(error.response?.data?.error || "Server error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -54,7 +58,9 @@ function TaskForm() {
           <option value="Gate_3">Gate_3</option>
           <option value="Gate_4">Gate_4</option>
         </select>
-        <button onClick={() => submit("/tasks/outbound", { serial_number: outboundSerial, gate })}>Create outbound task</button>
+        <button disabled={!outboundSerial || submitting} onClick={() => submit("/tasks/outbound", { serial_number: outboundSerial, gate })}>
+          {submitting ? "Creating task…" : "Create outbound task"}
+        </button>
       </section>
 
       <section className="task-section">
@@ -70,10 +76,12 @@ function TaskForm() {
           <option value="">Select available shelf</option>
           {destinationOptions.map((shelf) => <option key={shelf.shelf_id} value={shelf.shelf_id}>{shelf.shelf_id}</option>)}
         </select>
-        <button onClick={() => submit("/tasks/relocation", { pickup_shelf: pickupShelf, destination_shelf: destinationShelf })}>Create relocation task</button>
+        <button disabled={!pickupShelf || !destinationShelf || submitting} onClick={() => submit("/tasks/relocation", { pickup_shelf: pickupShelf, destination_shelf: destinationShelf })}>
+          {submitting ? "Creating task…" : "Create relocation task"}
+        </button>
       </section>
 
-      {message && <p className="task-message">{message}</p>}
+      {message && <p className="task-message" role="status">{message}</p>}
     </div>
   );
 }

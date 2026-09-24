@@ -64,7 +64,7 @@ function App() {
     const events = new EventSource("http://localhost:8000/robot-events");
     API.get("/camera-url").then(({ data }) => {
       if (typeof data.url === "string") setCameraUrl(data.url);
-    }).catch(() => {});
+    }).catch(() => { });
     events.addEventListener("camera-url", (event) => {
       const { url } = JSON.parse(event.data);
       if (typeof url === "string") setCameraUrl(url);
@@ -95,8 +95,8 @@ function App() {
       <section className="map-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Live MQTT monitor</p>
-            <h1>Warehouse robots</h1>
+            <p className="eyebrow">{activeSidebarTab === "warehouse" ? "Inventory operations" : activeSidebarTab === "task" ? "Task planning" : "Live MQTT monitor"}</p>
+            <h1>{activeSidebarTab === "monitor" ? "Warehouse robots" : "Warehouse inventory"}</h1>
           </div>
           <div className="header-meta">
             <span className={error ? "connection offline" : "connection"}><i />{error || "Live MQTT connection"}</span>
@@ -116,7 +116,11 @@ function App() {
         </div>
         {activeSidebarTab === "warehouse" ? (
           <WarehouseMonitor warehouse={warehouse} map={map} error={warehouseError} />
-        ) : map && <WarehouseMap map={map} robots={robots} />}
+        ) : activeSidebarTab === "task" ? (
+          <WarehouseLocations warehouse={warehouse} map={map} error={warehouseError} />
+        ) : map ? <WarehouseMap map={map} robots={robots} /> : (
+          <p className="map-loading" role="status">{error || "Loading warehouse map…"}</p>
+        )}
       </section>
       <aside className="task-panel">
         <div className="sidebar-tabs" role="tablist" aria-label="Warehouse controls">
@@ -136,7 +140,7 @@ function App() {
             className={activeSidebarTab === "task" ? "active" : ""}
             onClick={() => setActiveSidebarTab("task")}
           >
-            Create Task
+            Create <br /> New Tasks
           </button>
           <button
             type="button"
@@ -145,14 +149,16 @@ function App() {
             className={activeSidebarTab === "warehouse" ? "active" : ""}
             onClick={() => setActiveSidebarTab("warehouse")}
           >
-            Warehouse
+            Warehouse Logs
           </button>
         </div>
         {activeSidebarTab === "monitor" ? (
           <section className="side-monitor" aria-label="Robot state monitor">
             <div className="monitor-heading"><span>Robot monitor</span><small>Live state & queue</small></div>
             <div className="robot-list">
-              {Object.values(robots).map((robot) => (
+              {Object.values(robots).length === 0 ? (
+                <p className="empty-queue">Waiting for robot status…</p>
+              ) : Object.values(robots).map((robot) => (
                 <article className={`robot-card ${robot.robot_id.toLowerCase()}`} key={robot.robot_id}>
                   <header className="robot-card-header">
                     <span className={`robot-dot ${robot.robot_id.toLowerCase()}`} />
@@ -202,14 +208,7 @@ function WarehouseMonitor({ warehouse, map, error }) {
   const { stats, shelves } = warehouse;
   return (
     <section className="warehouse-monitor" aria-label="Live warehouse monitor">
-      <div className="shelf-map-heading">
-        <h2 className="shelf-map-title">Inventory locations</h2>
-        <div className="shelf-map-legend">
-          <span className="occupied-legend"><span className="occupied-swatches" aria-hidden="true">{ZONES.map((zone) => <i key={zone.title} title={zone.title} style={{ background: zone.color, borderColor: zone.color }} />)}</span>Occupied</span>
-          <span><i className="vacant" aria-hidden="true" />Empty</span>
-        </div>
-      </div>
-      {map && <InventoryLocationMap map={map} shelves={shelves} />}
+      <WarehouseLocationsContent map={map} shelves={shelves} />
       <div className="warehouse-cards">
         <MetricCard value={stats.total_items} label="Catalog items" />
         <MetricCard value={stats.in_stock} label="Currently in stock" />
@@ -217,6 +216,31 @@ function WarehouseMonitor({ warehouse, map, error }) {
         <MetricCard value={stats.total_logs} label="Log entries" />
       </div>
     </section>
+  );
+}
+
+function WarehouseLocations({ warehouse, map, error }) {
+  if (error) return <p className="warehouse-loading">{error}</p>;
+  if (!warehouse) return <p className="warehouse-loading">Loading warehouse locations…</p>;
+  return (
+    <section className="warehouse-locations-only" aria-label="Live warehouse inventory locations">
+      <WarehouseLocationsContent map={map} shelves={warehouse.shelves} />
+    </section>
+  );
+}
+
+function WarehouseLocationsContent({ map, shelves }) {
+  return (
+    <>
+      <div className="shelf-map-heading">
+        <h2 className="shelf-map-title">Inventory locations</h2>
+        <div className="shelf-map-legend">
+          <span className="occupied-legend"><span className="occupied-swatches" aria-hidden="true">{ZONES.map((zone) => <i key={zone.title} title={zone.title} style={{ background: zone.color, borderColor: zone.color }} />)}</span>Occupied</span>
+          <span><i className="vacant" aria-hidden="true" />Empty</span>
+        </div>
+      </div>
+      {map ? <InventoryLocationMap map={map} shelves={shelves} /> : <p className="inventory-map-loading" role="status">Loading warehouse map…</p>}
+    </>
   );
 }
 
