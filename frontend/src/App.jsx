@@ -109,7 +109,7 @@ function App() {
           </div>
         </div>
         {activeSidebarTab === "warehouse" ? (
-          <WarehouseMonitor warehouse={warehouse} error={warehouseError} />
+          <WarehouseMonitor warehouse={warehouse} map={map} error={warehouseError} />
         ) : map && <WarehouseMap map={map} robots={robots} />}
       </section>
       <aside className="task-panel">
@@ -190,7 +190,7 @@ const ZONES = [
   { title: "Orange", category: "Raw Materials", color: "#f2925c" },
 ];
 
-function WarehouseMonitor({ warehouse, error }) {
+function WarehouseMonitor({ warehouse, map, error }) {
   if (error) return <p className="warehouse-loading">{error}</p>;
   if (!warehouse) return <p className="warehouse-loading">Loading warehouse data…</p>;
   const { stats, shelves } = warehouse;
@@ -199,29 +199,61 @@ function WarehouseMonitor({ warehouse, error }) {
       <div className="warehouse-heading">
         <span className="refresh-status"><i />Refreshes every 2 seconds</span>
       </div>
+      <div className="shelf-map-heading">
+        <h2 className="shelf-map-title">Inventory locations</h2>
+        <div className="shelf-map-legend">
+          <span className="occupied-legend"><span className="occupied-swatches" aria-hidden="true">{ZONES.map((zone) => <i key={zone.title} title={zone.title} style={{ background: zone.color, borderColor: zone.color }} />)}</span>Occupied</span>
+          <span><i className="vacant" aria-hidden="true" />Empty</span>
+        </div>
+      </div>
+      {map && <InventoryLocationMap map={map} shelves={shelves} />}
       <div className="warehouse-cards">
         <MetricCard value={stats.total_items} label="Catalog items" />
         <MetricCard value={stats.in_stock} label="Currently in stock" />
         <MetricCard value={`${stats.occupied_shelves}/${stats.total_shelves}`} label="Shelves occupied" />
         <MetricCard value={stats.total_logs} label="Log entries" />
       </div>
-      <h2 className="shelf-map-title">Shelf map</h2>
-      <div className="warehouse-zones">
-        {ZONES.map((zone) => (
-          <section className="warehouse-zone" key={zone.category}>
-            <h3><span style={{ background: zone.color }} />{zone.title} — {zone.category}</h3>
-            <div className="shelf-grid">
-              {shelves.filter((shelf) => shelf.category === zone.category).map((shelf) => (
-                <article className={`warehouse-shelf ${shelf.empty ? "empty" : ""}`} style={{ background: zone.color }} key={shelf.shelf_id} title={shelf.item_name || "Empty shelf"}>
-                  <strong>{shelf.shelf_id}</strong>
-                  <span>{shelf.empty ? "empty" : shelf.item_id}</span>
-                </article>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
     </section>
+  );
+}
+
+function InventoryLocationMap({ map, shelves }) {
+  const shelfByNode = Object.fromEntries(shelves.map((shelf) => {
+    const [category, number] = shelf.shelf_id.split("_");
+    return [`${category[0].toUpperCase()}${category.slice(1)}_${number}`, shelf];
+  }));
+  return (
+    <svg className="inventory-location-map" viewBox="0 0 108 112" role="img" aria-label="Warehouse map showing occupied and empty shelf locations">
+      {map.edges.map(([from, to]) => {
+        const start = map.nodes[from];
+        const end = map.nodes[to];
+        return <line key={`${from}-${to}`} x1={start[0]} y1={start[1]} x2={end[0]} y2={end[1]} className="map-road" />;
+      })}
+      {Object.entries(map.nodes).map(([node, [x, y]]) => {
+        const isJunction = node.includes("_J");
+        const shelf = shelfByNode[node];
+        const color = shelf && ZONES.find((zone) => zone.category === shelf.category)?.color;
+        if (isJunction) return <circle key={node} cx={x} cy={y} r="0.8" className="junction" />;
+        const labelY = nodeLabelY(node, y);
+        return (
+          <g key={node}>
+            {shelf ? (
+              <g className={`inventory-shelf-card ${shelf.empty ? "empty" : "occupied"}`}>
+                <rect x={x - 5} y={y - 5} width="10" height="10" rx="0.8" style={{ "--shelf-color": color }} />
+                <text x={x} y={y - 0.5} textAnchor="middle" className="inventory-shelf-name">{shelf.shelf_id.split("_").at(-1)}</text>
+                <text x={x} y={y + 2.2} textAnchor="middle" className="inventory-shelf-item">{shelf.empty ? "empty" : shelf.item_id}</text>
+              </g>
+            ) : (
+              <>
+                <circle cx={x} cy={y} r="1.35" className={nodeClass(node, false)} />
+                <text x={x} y={labelY} textAnchor={nodeLabelAnchor(x)} className="node-label">{node}</text>
+              </>
+            )}
+            <title>{shelf ? (shelf.empty ? `${shelf.shelf_id}: Empty` : `${shelf.item_name || shelf.item_id} (${shelf.item_id})`) : node}</title>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
