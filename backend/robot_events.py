@@ -4,6 +4,20 @@ from threading import Lock
 
 _subscribers = set()
 _lock = Lock()
+_camera_url = None
+
+
+def get_camera_url():
+    with _lock:
+        return _camera_url
+
+
+def publish_camera_url(url):
+    """Store and broadcast the latest URL reported by the QR camera."""
+    global _camera_url
+    with _lock:
+        _camera_url = url
+    _publish({"event": "camera-url", "data": {"url": url}})
 
 
 def subscribe():

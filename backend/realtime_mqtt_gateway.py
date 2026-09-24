@@ -5,13 +5,14 @@ Topics:
   agv/<robot_id>/command  one JSON movement command sent back to the ESP32
   agv/<robot_id>/inbound  optional inbound inventory report
 """
+import ipaddress
 import json
 import logging
 import os
 
 from rfid_node_map import resolve_node_id
 from realtime_navigation import NodeCommandPlanner
-from robot_events import publish_robot_state, publish_warehouse_alert
+from robot_events import publish_camera_url, publish_robot_state, publish_warehouse_alert
 from scheduler.scheduler import robots, update_robot_node
 from warehouse_tasks import create_inbound_warehouse_task
 
@@ -78,6 +79,7 @@ def start_realtime_mqtt_gateway():
 
     node_topic = os.getenv("MQTT_NODE_TOPIC", "agv/+/node")
     inbound_topic = os.getenv("MQTT_INBOUND_TOPIC", "agv/+/inbound")
+    camera_ip_topic = os.getenv("MQTT_CAMERA_IP_TOPIC", "cam/qrip")
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     if username := os.getenv("MQTT_USERNAME"):
         client.username_pw_set(username, os.getenv("MQTT_PASSWORD"))
@@ -88,10 +90,21 @@ def start_realtime_mqtt_gateway():
             return
         mqtt_client.subscribe(node_topic, qos=1)
         mqtt_client.subscribe(inbound_topic, qos=1)
-        LOG.info("Realtime MQTT connected; subscribed to %s and %s", node_topic, inbound_topic)
+        mqtt_client.subscribe(camera_ip_topic, qos=1)
+        LOG.info("Realtime MQTT connected; subscribed to %s, %s, and %s", node_topic, inbound_topic, camera_ip_topic)
 
     def on_message(mqtt_client, _userdata, message):
         try:
+            if message.topic == camera_ip_topic:
+                payload = json.loads(message.payload.decode("utf-8"))
+                camera_ip = payload.get("qrip") if isinstance(payload, dict) else None
+                if not isinstance(camera_ip, str):
+                    raise ValueError("Camera IP message requires a qrip string")
+                camera_ip = str(ipaddress.ip_address(camera_ip.strip()))
+                publish_camera_url(f"http://{camera_ip}/")
+                LOG.info("QR camera is available at http://%s/", camera_ip)
+                return
+
             robot_id = _robot_id_from_topic(message.topic)
             if not robot_id or robot_id not in robots:
                 raise ValueError("Expected a known robot topic: agv/<robot_id>/node")

@@ -15,7 +15,7 @@ from object_detection.object_detection_app import object_detection_bp
 from scheduler.scheduler import dispatch_task, robot_state, robots, update_robot_node
 from new_warehouse_map import edges, nodes
 from realtime_mqtt_gateway import start_realtime_mqtt_gateway
-from robot_events import publish_robot_state, publish_warehouse_alert, subscribe, unsubscribe
+from robot_events import get_camera_url, publish_robot_state, publish_warehouse_alert, subscribe, unsubscribe
 from warehouse_tasks import create_inbound_warehouse_task, tasks
 from database.database import (
     WarehouseDatabaseError,
@@ -211,6 +211,12 @@ def report_robot_node(robot_id):
 @app.route("/map")
 def get_map():
     return jsonify({"nodes": nodes, "edges": edges})
+
+
+@app.route("/camera-url")
+def get_camera_url_route():
+    """Return the most recent QR camera URL received over MQTT."""
+    return jsonify({"url": get_camera_url()})
 
 
 @app.route("/robot-events")

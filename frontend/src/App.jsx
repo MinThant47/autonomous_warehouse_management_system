@@ -11,6 +11,7 @@ function App() {
   const [warehouseError, setWarehouseError] = useState("");
   const [activeSidebarTab, setActiveSidebarTab] = useState("monitor");
   const [warehouseAlert, setWarehouseAlert] = useState(null);
+  const [cameraUrl, setCameraUrl] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -59,6 +60,13 @@ function App() {
 
   useEffect(() => {
     const events = new EventSource("http://localhost:8000/robot-events");
+    API.get("/camera-url").then(({ data }) => {
+      if (typeof data.url === "string") setCameraUrl(data.url);
+    }).catch(() => {});
+    events.addEventListener("camera-url", (event) => {
+      const { url } = JSON.parse(event.data);
+      if (typeof url === "string") setCameraUrl(url);
+    });
     events.addEventListener("robot-state", (event) => {
       const robot = JSON.parse(event.data);
       setRobots((current) => ({ ...current, [robot.robot_id]: robot }));
@@ -93,7 +101,7 @@ function App() {
             <a className="object-detection-link" href={`http://${window.location.hostname || "localhost"}:8000/object-detection/`}>
               Live View
             </a>
-            <a className="qr-scanner-link" href="http://esp32camqr.local/">
+            <a className="qr-scanner-link" href={cameraUrl || undefined} aria-disabled={!cameraUrl} title={cameraUrl ? "Open QR scanner" : "Waiting for camera IP from MQTT"}>
               QR Scanner View
             </a>
           </div>
