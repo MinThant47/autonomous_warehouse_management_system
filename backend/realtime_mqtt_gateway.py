@@ -8,6 +8,7 @@ Topics:
 import ipaddress
 import json
 import logging
+import math
 import os
 
 from rfid_node_map import resolve_node_id
@@ -40,6 +41,47 @@ def _node_id_from_payload(payload):
     if not isinstance(identifier, str) or not identifier.strip():
         raise ValueError("Node payload requires a non-empty RFID ID or node ID")
     return resolve_node_id(identifier)
+
+
+def _virtual_state_from_payload(payload, robot_id, current_node, goal):
+    """Read optional on-edge localization fields without changing RFID reports."""
+    try:
+        decoded = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(decoded, dict):
+        return None
+
+    required = ("previous_node", "next_node", "current_position", "heading")
+    present = [field in decoded for field in required]
+    if not any(present):
+        return None
+    if not all(present):
+        raise ValueError("On-edge localization requires previous_node, next_node, current_position, and heading")
+
+    position = decoded["current_position"]
+    if not isinstance(position, (list, tuple)) or len(position) != 2:
+        raise ValueError("current_position must be a two-number array")
+    try:
+        x, y = float(position[0]), float(position[1])
+        heading = float(decoded["heading"])
+        distance_from_previous = float(decoded.get("distance_from_previous_cm", 0.0))
+        distance_to_next = float(decoded.get("distance_to_next_cm", 0.0))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Localization coordinates, heading, and distances must be numbers") from error
+    if not all(math.isfinite(value) for value in (x, y, heading, distance_from_previous, distance_to_next)):
+        raise ValueError("Localization values must be finite numbers")
+    return {
+        "robot_id": robot_id,
+        "current_node": current_node,
+        "previous_node": decoded["previous_node"],
+        "next_node": decoded["next_node"],
+        "destination": goal,
+        "current_position": (x, y),
+        "heading": heading,
+        "distance_from_previous_cm": distance_from_previous,
+        "distance_to_next_cm": distance_to_next,
+    }
 
 
 def _inbound_details_from_payload(payload):
@@ -118,8 +160,10 @@ def start_realtime_mqtt_gateway():
             node_id = _node_id_from_payload(message.payload)
             state = update_robot_node(robot_id, node_id, source="mqtt-rfid")
             goal = _task_goal(robot_id)
+            virtual_state = _virtual_state_from_payload(message.payload, robot_id, node_id, goal) if goal else None
             command = (
-                COMMAND_PLANNER.command_for_node(robot_id, node_id, goal)
+                COMMAND_PLANNER.command_for_virtual_state(virtual_state)
+                if virtual_state else COMMAND_PLANNER.command_for_node(robot_id, node_id, goal)
                 if goal else {"action": "STOP", "current_node": node_id, "next_node": None, "goal": None, "path": []}
             )
             command_topic = f"agv/{robot_id}/command"

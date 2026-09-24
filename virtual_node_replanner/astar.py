@@ -1,6 +1,5 @@
 import heapq
 
-
 def heuristic(graph, current, goal):
 
     x1, y1 = graph.get_position(current)
@@ -54,7 +53,9 @@ def astar(graph, start, goal):
     heapq.heappush(open_list, (f_score[start], start))
 
     closed_set = set()
+
     came_from = {}
+
     expanded_nodes = set()
     exploration_order = []
     iterations = 0
