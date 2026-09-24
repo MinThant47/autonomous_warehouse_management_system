@@ -78,7 +78,7 @@ def start_realtime_mqtt_gateway():
         raise RuntimeError("Install backend requirements to enable MQTT.") from error
 
     node_topic = os.getenv("MQTT_NODE_TOPIC", "agv/+/node")
-    inbound_topic = os.getenv("MQTT_INBOUND_TOPIC", "agv/+/inbound")
+    inbound_topic = os.getenv("MQTT_INBOUND_TOPIC", "cam/inbound")
     camera_ip_topic = os.getenv("MQTT_CAMERA_IP_TOPIC", "cam/qrip")
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     if username := os.getenv("MQTT_USERNAME"):
@@ -105,15 +105,15 @@ def start_realtime_mqtt_gateway():
                 LOG.info("QR camera is available at http://%s/", camera_ip)
                 return
 
-            robot_id = _robot_id_from_topic(message.topic)
-            if not robot_id or robot_id not in robots:
-                raise ValueError("Expected a known robot topic: agv/<robot_id>/node")
-
-            if message.topic.split("/")[-1] == "inbound":
+            if message.topic == inbound_topic:
                 serial_code, pickup_location = _inbound_details_from_payload(message.payload)
                 _task, result, _storage = create_inbound_warehouse_task(serial_code, pickup_location)
                 publish_robot_state(result["robot_state"])
                 return
+
+            robot_id = _robot_id_from_topic(message.topic)
+            if not robot_id or robot_id not in robots:
+                raise ValueError("Expected a known robot topic: agv/<robot_id>/node")
 
             node_id = _node_id_from_payload(message.payload)
             state = update_robot_node(robot_id, node_id, source="mqtt-rfid")
@@ -130,7 +130,7 @@ def start_realtime_mqtt_gateway():
             LOG.info("%s reached %s; sent %s", robot_id, node_id, command["action"])
         except (UnicodeDecodeError, ValueError) as error:
             LOG.warning("Ignoring MQTT message on %s: %s", message.topic, error)
-            if message.topic.split("/")[-1] == "inbound":
+            if message.topic == inbound_topic:
                 publish_warehouse_alert(str(error), locals().get("serial_code"))
 
     client.on_connect = on_connect

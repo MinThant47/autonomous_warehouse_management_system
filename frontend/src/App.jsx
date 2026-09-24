@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import TaskForm from "./components/TaskForm";
 import API from "./api";
+import amrWarehouseDesign from "./assets/warehouse-map/amr-warehouse.png";
+import finalYearThesisDesign from "./assets/warehouse-map/final-year-thesis.png";
 import "./App.css";
 
 function App() {
@@ -271,6 +273,8 @@ function WarehouseMap({ map, robots }) {
         const end = point(map.nodes[to]);
         return <line key={`${from}-${to}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} className="map-road" />;
       })}
+      <image href={amrWarehouseDesign} x="25" y="48.45" width="22" height="11.1" preserveAspectRatio="xMidYMid meet" aria-label="Autonomous Mobile Robot Warehouse design" />
+      <image href={finalYearThesisDesign} x="61" y="48.85" width="22" height="10.3" preserveAspectRatio="xMidYMid meet" aria-label="Final Year Thesis design" />
       {Object.entries(map.nodes).map(([node, position]) => {
         const { x, y } = point(position);
         const isJunction = node.includes("_J");

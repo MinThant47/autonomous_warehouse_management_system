@@ -72,7 +72,7 @@ def start_mqtt_gateway():
         raise RuntimeError("Install backend requirements to enable MQTT.") from error
 
     node_topic = os.getenv("MQTT_NODE_TOPIC", "agv/+/node")
-    inbound_topic = os.getenv("MQTT_INBOUND_TOPIC", "agv/+/inbound")
+    inbound_topic = os.getenv("MQTT_INBOUND_TOPIC", "cam/inbound")
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     username = os.getenv("MQTT_USERNAME")
     if username:
@@ -88,25 +88,25 @@ def start_mqtt_gateway():
 
     def on_message(_client, _userdata, message):
         try:
-            robot_id = _robot_id_from_topic(message.topic)
-            if not robot_id:
-                raise ValueError("Expected topic agv/<robot_id>/node or agv/<robot_id>/inbound")
-            if message.topic.split("/")[-1] == "inbound":
+            if message.topic == inbound_topic:
                 serial_code, pickup_location = _inbound_details_from_payload(message.payload)
                 task, result, storage = create_inbound_warehouse_task(serial_code, pickup_location)
-                state = result["robot_state"]
+                publish_robot_state(result["robot_state"])
                 LOG.info(
-                    "Created inbound task %s from %s to %s for %s",
-                    task["id"], pickup_location, storage["dropoff_location"], robot_id,
+                    "Created inbound task %s from %s to %s",
+                    task["id"], pickup_location, storage["dropoff_location"],
                 )
-            else:
-                state = update_robot_node(robot_id, _node_id_from_payload(message.payload))
+                return
+
+            robot_id = _robot_id_from_topic(message.topic)
+            if not robot_id:
+                raise ValueError("Expected topic agv/<robot_id>/node")
+            state = update_robot_node(robot_id, _node_id_from_payload(message.payload))
             publish_robot_state(state)
-            if message.topic.split("/")[-1] != "inbound":
-                LOG.info("Updated %s at %s", robot_id, state["node"])
+            LOG.info("Updated %s at %s", robot_id, state["node"])
         except (UnicodeDecodeError, ValueError) as error:
             LOG.warning("Ignoring MQTT message on %s: %s", message.topic, error)
-            if message.topic.split("/")[-1] == "inbound":
+            if message.topic == inbound_topic:
                 publish_warehouse_alert(str(error), locals().get("serial_code"))
 
     client.on_connect = on_connect
