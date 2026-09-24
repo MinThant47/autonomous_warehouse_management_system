@@ -103,9 +103,15 @@ function App() {
             <a className="object-detection-link" href={`http://${window.location.hostname || "localhost"}:8000/object-detection/`}>
               Live View
             </a>
-            <a className="qr-scanner-link" href={cameraUrl || undefined} aria-disabled={!cameraUrl} title={cameraUrl ? "Open QR scanner" : "Waiting for camera IP from MQTT"}>
+            <button
+              className="qr-scanner-link"
+              type="button"
+              disabled={!cameraUrl}
+              onClick={() => window.open(cameraUrl, "_blank", "noopener,noreferrer")}
+              title={cameraUrl ? "Open QR scanner" : "Waiting for camera IP from MQTT"}
+            >
               QR Scanner View
-            </a>
+            </button>
           </div>
         </div>
         {activeSidebarTab === "warehouse" ? (
@@ -196,9 +202,6 @@ function WarehouseMonitor({ warehouse, map, error }) {
   const { stats, shelves } = warehouse;
   return (
     <section className="warehouse-monitor" aria-label="Live warehouse monitor">
-      <div className="warehouse-heading">
-        <span className="refresh-status"><i />Refreshes every 2 seconds</span>
-      </div>
       <div className="shelf-map-heading">
         <h2 className="shelf-map-title">Inventory locations</h2>
         <div className="shelf-map-legend">
@@ -273,12 +276,25 @@ function WarehouseLogFeed({ warehouse, error }) {
           <article key={log.id} className="warehouse-log-entry">
             <div><strong>{log.item_id}</strong><span className={`log-status ${log.status.toLowerCase()}`}>{log.status}</span></div>
             <small>{log.pickup_location || "—"} → {log.dropoff_location || "—"}</small>
-            <time>{log.time}</time>
+            <time dateTime={log.time}>{formatWarehouseTimestamp(log.time)}</time>
           </article>
         ))}
       </div>
     </section>
   );
+}
+
+function formatWarehouseTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
 }
 
 function RobotQueue({ tasks, currentTaskId, robotId }) {
