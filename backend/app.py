@@ -12,7 +12,7 @@ from flask import Flask, Response, request, jsonify, stream_with_context
 from flask_cors import CORS
 from waitress import serve
 from object_detection.object_detection_app import object_detection_bp
-from scheduler.scheduler import dispatch_task, robot_state, robots, update_robot_node
+from scheduler.scheduler import dispatch_task, reorder_pending_tasks, robot_state, robots, update_robot_node
 from new_warehouse_map import edges, nodes
 from realtime_mqtt_gateway import start_realtime_mqtt_gateway
 from robot_events import get_camera_url, publish_robot_state, publish_warehouse_alert, subscribe, unsubscribe
@@ -202,6 +202,18 @@ def report_robot_node(robot_id):
         return jsonify({"error": "node_id is required"}), 400
     try:
         state = update_robot_node(robot_id, node_id.strip(), source="http")
+        publish_robot_state(state)
+        return jsonify(state)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/robots/<robot_id>/queue", methods=["PUT"])
+def reorder_robot_queue(robot_id):
+    """Set the order of every pending job; the active job remains fixed."""
+    data = request.get_json(silent=True) or {}
+    try:
+        state = reorder_pending_tasks(robot_id, data.get("task_ids"))
         publish_robot_state(state)
         return jsonify(state)
     except ValueError as error:

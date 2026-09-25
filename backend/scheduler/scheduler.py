@@ -36,6 +36,7 @@ def generate_robots():
             "node": "Parking_1",
             "next_node": "Parking_1",
             "queue": [],
+            "manual_queue_order": False,
             "speed": DEFAULT_ROBOT_SPEED,
             "status": "IDLE",
             "has_payload": False,
@@ -46,6 +47,7 @@ def generate_robots():
             "node": "Parking_2",
             "next_node": "Parking_2",
             "queue": [],
+            "manual_queue_order": False,
             "speed": DEFAULT_ROBOT_SPEED,
             "status": "IDLE",
             "has_payload": False,
@@ -574,6 +576,20 @@ def rerank_robot_queue(robot_name):
         fixed_prefix = [robot["queue"][0]]
         pending_tasks = robot["queue"][1:]
 
+    # A UI reorder takes precedence over the learned ranker until the queue
+    # drains. New work is appended, and the chosen order is retained.
+    if robot.get("manual_queue_order"):
+        for rank, task in enumerate(robot["queue"], start=1):
+            task["sequence_rank"] = rank
+        for position, task in enumerate(pending_tasks, start=1):
+            task["pending_rank"] = position
+            task["previous_pending_rank"] = position
+            task["rank_move"] = "same"
+            task["rank_delta"] = 0
+        update_current_task_remaining_time(robot_name)
+        robot["next_node"] = robot["queue"][-1]["DL"] if robot["queue"] else robot["node"]
+        return
+
     before_pending_positions = {
         task["id"]: position
         for position, task in enumerate(pending_tasks, start=1)
@@ -784,6 +800,36 @@ def dispatch_task(task):
         "queue": task_queue(robot_name),
         "robot_state": robot_state(robot_name),
     }
+
+
+def reorder_pending_tasks(robot_name, ordered_task_ids):
+    """Apply an explicit pending task order while keeping the active head fixed."""
+    if robot_name not in robots:
+        raise ValueError(f"Unknown robot ID: {robot_name}")
+    robot = robots[robot_name]
+    fixed_prefix = [robot["queue"][0]] if "current_task" in robot and robot["queue"] else []
+    pending = robot["queue"][len(fixed_prefix):]
+    pending_ids = [task["id"] for task in pending]
+    if (not isinstance(ordered_task_ids, list)
+            or any(isinstance(task_id, bool) or not isinstance(task_id, int) for task_id in ordered_task_ids)
+            or len(ordered_task_ids) != len(set(ordered_task_ids))
+            or set(ordered_task_ids) != set(pending_ids)):
+        raise ValueError("ordered_task_ids must contain every pending task ID exactly once")
+
+    by_id = {task["id"]: task for task in pending}
+    robot["queue"] = fixed_prefix + [by_id[task_id] for task_id in ordered_task_ids]
+    robot["manual_queue_order"] = bool(pending)
+    for rank, task in enumerate(robot["queue"], start=1):
+        task["sequence_rank"] = rank
+    for position, task in enumerate(robot["queue"][len(fixed_prefix):], start=1):
+        task["pending_rank"] = position
+        task["previous_pending_rank"] = position
+        task["rank_move"] = "manual"
+        task["rank_delta"] = 0
+    update_current_task_remaining_time(robot_name)
+    robot["next_node"] = robot["queue"][-1]["DL"] if robot["queue"] else robot["node"]
+    refresh_robot_projection(robot_name)
+    return robot_state(robot_name)
     
 # -----------------------------
 # TA COST (SYNCED)
@@ -1054,6 +1100,8 @@ def complete_current_task(robot_name):
     robot["has_payload"] = False
     start_next_task(robot_name)
     rerank_robot_queue(robot_name)
+    if not robot["queue"]:
+        robot["manual_queue_order"] = False
     return current_task
 
 

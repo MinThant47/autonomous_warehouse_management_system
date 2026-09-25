@@ -154,7 +154,7 @@ function App() {
         </div>
         {activeSidebarTab === "monitor" ? (
           <section className="side-monitor" aria-label="Robot state monitor">
-            <div className="monitor-heading"><span>Robot monitor</span><small>Live state & queue</small></div>
+            <div className="monitor-heading"><span>Robot monitor</span><small>Drag queued tasks to reorder · active task stays fixed</small></div>
             <div className="robot-list">
               {Object.values(robots).length === 0 ? (
                 <p className="empty-queue">Waiting for robot status…</p>
@@ -322,17 +322,79 @@ function formatWarehouseTimestamp(value) {
 }
 
 function RobotQueue({ tasks, currentTaskId, robotId }) {
+  const [updating, setUpdating] = useState(false);
+  const [queueError, setQueueError] = useState("");
+  const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const saveOrder = async (orderedTasks) => {
+    if (updating) return;
+    setUpdating(true);
+    setQueueError("");
+    try {
+      await API.put(`/robots/${robotId}/queue`, { task_ids: orderedTasks.map((task) => task.id) });
+    } catch (error) {
+      setQueueError(error.response?.data?.error || "Could not update task order");
+    } finally {
+      setUpdating(false);
+      setDraggedTaskId(null);
+      setDropTarget(null);
+    }
+  };
+  const dropOnTask = (targetTaskId, afterTarget) => {
+    if (draggedTaskId === null || draggedTaskId === targetTaskId || updating) return;
+    const pending = tasks.filter((task) => task.id !== currentTaskId);
+    const from = pending.findIndex((task) => task.id === draggedTaskId);
+    const to = pending.findIndex((task) => task.id === targetTaskId);
+    if (from < 0 || to < 0) return;
+    const [moved] = pending.splice(from, 1);
+    const insertionIndex = to + (afterTarget ? 1 : 0);
+    pending.splice(insertionIndex > from ? insertionIndex - 1 : insertionIndex, 0, moved);
+    saveOrder(pending);
+  };
   if (!tasks.length) return <p className="empty-queue">No assigned tasks</p>;
   return (
-    <ol className="task-queue">
+    <>
+    <ol className="task-queue" aria-label={`${robotId} task queue`}>
       {tasks.map((task) => {
         const active = task.id === currentTaskId;
-        return <li className={`task-item ${robotId.toLowerCase()} ${active ? "active-task" : ""}`} key={task.id}>
-          <div><strong>#{task.id} · {active ? "Active" : `Queue ${task.pending_rank ?? "–"}`}</strong><span>{task.status}</span></div>
+        const pending = tasks.filter((queued) => queued.id !== currentTaskId);
+        const position = pending.findIndex((queued) => queued.id === task.id);
+        return <li
+          className={`task-item ${robotId.toLowerCase()} ${active ? "active-task" : ""} ${draggedTaskId === task.id ? "dragging" : ""} ${dropTarget?.taskId === task.id ? `drop-${dropTarget.side}` : ""}`}
+          key={task.id}
+          draggable={!active && !updating}
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(task.id));
+            setDraggedTaskId(task.id);
+          }}
+          onDragOver={(event) => {
+            if (active || draggedTaskId === null || draggedTaskId === task.id) return;
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            const side = event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+            if (dropTarget?.taskId !== task.id || dropTarget?.side !== side) {
+              setDropTarget({ taskId: task.id, side });
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const afterTarget = event.clientY > event.currentTarget.getBoundingClientRect().top + event.currentTarget.offsetHeight / 2;
+            dropOnTask(task.id, afterTarget);
+          }}
+          onDragEnd={() => {
+            setDropTarget(null);
+            if (!updating) setDraggedTaskId(null);
+          }}
+        >
+          <div><strong>#{task.id} · {active ? "Active" : `Queue ${position + 1}`}</strong><span>{task.status}</span></div>
           <small>{task.PL} → {task.DL} · deadline {task.deadline}s</small>
+          {!active && <span className="drag-handle" aria-hidden="true">⠿</span>}
         </li>;
       })}
     </ol>
+    {queueError && <p className="queue-error" role="alert">{queueError}</p>}
+    </>
   );
 }
 
