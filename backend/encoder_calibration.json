@@ -1,0 +1,15 @@
+{
+  "description": "R1 is temporarily marked calibrated for isolated Postman simulation only; its tick factors remain placeholders. Restore calibrated=false before connecting R1 hardware and set true only after measurement.",
+  "robots": {
+    "R1": {
+      "ticks_per_cm_left": 244,
+      "ticks_per_cm_right": 244,
+      "calibrated": true
+    },
+    "R2": {
+      "ticks_per_cm_left": 200,
+      "ticks_per_cm_right": 200,
+      "calibrated": false
+    }
+  }
+}

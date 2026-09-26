@@ -33,6 +33,12 @@ def astar(graph, start, goal):
 
     open_list = []
 
+    heapq.heappush(open_list, (0, start))
+
+    closed_set = set()
+
+    came_from = {}
+
     g_score = {
         node: float("inf")
         for node in graph.nodes
@@ -51,23 +57,9 @@ def astar(graph, start, goal):
         goal
     )
 
-    heapq.heappush(open_list, (f_score[start], start))
-
-    closed_set = set()
-    came_from = {}
-    expanded_nodes = set()
-    exploration_order = []
-    iterations = 0
-    neighbor_evaluations = 0
-    maximum_open_set_size = len(open_list)
-
     while open_list:
 
         current = heapq.heappop(open_list)[1]
-        iterations += 1
-        if current not in expanded_nodes:
-            expanded_nodes.add(current)
-            exploration_order.append(current)
 
         if current == goal:
 
@@ -76,20 +68,12 @@ def astar(graph, start, goal):
                     came_from,
                     current
                 ),
-                "distance": g_score[goal],
-                "nodes_explored": len(expanded_nodes),
-                "astar_iterations": iterations,
-                "exploration_order": exploration_order,
-                "closed_nodes_count": len(expanded_nodes),
-                "neighbor_evaluations": neighbor_evaluations,
-                "maximum_open_set_size": maximum_open_set_size,
+                "distance": g_score[goal]
             }
 
         closed_set.add(current)
 
         for neighbor, cost in graph.get_neighbors(current):
-
-            neighbor_evaluations += 1
 
             if neighbor in closed_set:
                 continue
@@ -121,6 +105,5 @@ def astar(graph, start, goal):
                         neighbor
                     )
                 )
-                maximum_open_set_size = max(maximum_open_set_size, len(open_list))
 
     return None

@@ -78,8 +78,7 @@ class RealtimeReplanningService:
             "status": "success",
             "path": result["path"],
             "distance": result["distance"],
-            "directions": directions,
-            "search_metrics": self._search_metrics(result),
+            "directions": directions
         }
 
     def replan(
@@ -286,19 +285,5 @@ class RealtimeReplanningService:
 
             "estimated_total_cost": selected_cost,
 
-            "search_metrics": self._search_metrics(selected_path),
-
             "path": selected_path["path"]
-        }
-
-    @staticmethod
-    def _search_metrics(result):
-        """Expose the A* diagnostics without changing route selection."""
-        return {
-            "nodes_explored": result.get("nodes_explored", 0),
-            "astar_iterations": result.get("astar_iterations", 0),
-            "exploration_order": result.get("exploration_order", []),
-            "closed_nodes_count": result.get("closed_nodes_count", 0),
-            "neighbor_evaluations": result.get("neighbor_evaluations", 0),
-            "maximum_open_set_size": result.get("maximum_open_set_size", 0),
         }

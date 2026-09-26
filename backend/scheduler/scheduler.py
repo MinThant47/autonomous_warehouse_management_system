@@ -3,6 +3,7 @@ import numpy as np
 import joblib
 import pandas as pd
 from datetime import datetime, timezone
+from encoder_distance import calculate_distance_delta_cm, is_encoder_calibrated
 
 # 1 graph distance unit = 0.0254 meter (1 inch)
 MAP_SCALE = 0.0254
@@ -38,9 +39,15 @@ def generate_robots():
             "queue": [],
             "speed": DEFAULT_ROBOT_SPEED,
             "status": "IDLE",
+            "idle_goal": None,
+            "map_edge": None,
+            "display_route": [],
             "has_payload": False,
             "last_node_update": None,
             "last_update_source": None,
+            "encoder_telemetry": None,
+            "encoder_node_baseline_ticks": None,
+            "distance_since_last_node_cm": None,
         },
         "R2": {
             "node": "Parking_2",
@@ -48,9 +55,15 @@ def generate_robots():
             "queue": [],
             "speed": DEFAULT_ROBOT_SPEED,
             "status": "IDLE",
+            "idle_goal": None,
+            "map_edge": None,
+            "display_route": [],
             "has_payload": False,
             "last_node_update": None,
             "last_update_source": None,
+            "encoder_telemetry": None,
+            "encoder_node_baseline_ticks": None,
+            "distance_since_last_node_cm": None,
         }
     }
 
@@ -763,6 +776,9 @@ def dispatch_task(task):
     prediction = classifier.predict(features)[0]
     robot_name = "R1" if prediction == 0 else "R2"
     robot = robots[robot_name]
+    interrupted_idle_return = robot.get("idle_goal") is not None
+    # New work takes precedence over a previous idle return route.
+    robot["idle_goal"] = None
     robot_was_free = not robot["queue"]
 
     task = dict(task)  # do not mutate the server request object
@@ -781,6 +797,7 @@ def dispatch_task(task):
 
     return {
         "assigned_robot": robot_name,
+        "interrupted_idle_return": interrupted_idle_return,
         "queue": task_queue(robot_name),
         "robot_state": robot_state(robot_name),
     }
@@ -971,19 +988,91 @@ def task_queue(robot_name):
 def robot_state(robot_name):
     """Return the scheduler state that should be exposed to the WMS."""
     robot = robots[robot_name]
+    map_edge = robot.get("map_edge")
+    map_position = list(nodes[robot["node"]])
+    distance_cm = robot.get("distance_since_last_node_cm")
+    if map_edge and distance_cm is not None:
+        start = map_edge.get("start_position") or nodes.get(map_edge.get("from_node"))
+        end = nodes.get(map_edge.get("to_node"))
+        if start and end and map_edge.get("from_node") == robot["node"]:
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            edge_length_cm = (abs(dx) + abs(dy)) * MAP_SCALE * 100
+            if edge_length_cm > 0:
+                distance_origin_cm = float(map_edge.get("distance_origin_cm", 0.0))
+                progress_since_edge_start = max(float(distance_cm) - distance_origin_cm, 0.0)
+                progress = min(progress_since_edge_start, edge_length_cm)
+                fraction = progress / edge_length_cm
+                map_position = [start[0] + dx * fraction, start[1] + dy * fraction]
+    display_route = list(robot.get("display_route", []))
+    if not display_route:
+        current_task = robot.get("current_task")
+        if current_task:
+            goal = current_task["DL"] if current_task.get("status") == "TO_DROPOFF" else current_task["PL"]
+        else:
+            goal = robot.get("idle_goal")
+        if goal in nodes and robot["node"] in nodes:
+            try:
+                planned_path = nx.astar_path(G, robot["node"], goal, heuristic=heuristic, weight="weight")
+                display_route = planned_path[1:]
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                display_route = []
     return {
         "robot_id": robot_name,
         "node": robot["node"],
+        "map_position": map_position,
+        "map_edge": dict(map_edge) if map_edge else None,
+        "display_route": display_route,
         "status": robot["status"],
         "has_payload": robot["has_payload"],
         "speed_mps": robot["speed"],
         "current_task_id": robot.get("current_task", {}).get("id"),
+        "idle_goal": robot.get("idle_goal"),
         "queue_length": len(robot["queue"]),
         "estimated_seconds_until_free": evaluate_fixed_robot_queue(robot_name),
         "last_node_update": robot["last_node_update"],
         "last_update_source": robot["last_update_source"],
+        "encoder_telemetry": dict(robot["encoder_telemetry"]) if robot["encoder_telemetry"] else None,
+        "distance_since_last_node_cm": robot["distance_since_last_node_cm"],
+        "encoder_distance_calibrated": is_encoder_calibrated(robot_name),
         "queue": task_queue(robot_name),
     }
+
+
+def update_robot_encoder_telemetry(robot_name, ticks_left, ticks_right):
+    """Store raw counters and accumulate calibrated distance since the last RFID node."""
+    if robot_name not in robots:
+        raise ValueError(f"Unknown robot ID: {robot_name}")
+    if isinstance(ticks_left, bool) or not isinstance(ticks_left, int):
+        raise ValueError("ticks_L must be an integer")
+    if isinstance(ticks_right, bool) or not isinstance(ticks_right, int):
+        raise ValueError("ticks_R must be an integer")
+
+    robot = robots[robot_name]
+    baseline = robot["encoder_node_baseline_ticks"]
+    if baseline is None:
+        baseline = {"ticks_L": ticks_left, "ticks_R": ticks_right}
+        robot["encoder_node_baseline_ticks"] = baseline
+    tick_delta_left = ticks_left - baseline["ticks_L"]
+    tick_delta_right = ticks_right - baseline["ticks_R"]
+    if tick_delta_left < 0 or tick_delta_right < 0:
+        # Current firmware counters are expected to be cumulative and increasing.
+        # A reset/rollback makes this segment's distance unreliable until a new RFID node.
+        robot["distance_since_last_node_cm"] = None
+        distance_since_node_cm = None
+    else:
+        distance_since_node_cm = calculate_distance_delta_cm(
+            robot_name, tick_delta_left, tick_delta_right
+        )
+        robot["distance_since_last_node_cm"] = distance_since_node_cm
+
+    robot["encoder_telemetry"] = {
+        "ticks_L": ticks_left,
+        "ticks_R": ticks_right,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "distance_since_last_node_cm": distance_since_node_cm,
+        "distance_calibrated": is_encoder_calibrated(robot_name),
+    }
+    return robot_state(robot_name)
 
 
 def update_robot_node(robot_name, node_id, source="mqtt"):
@@ -1000,8 +1089,20 @@ def update_robot_node(robot_name, node_id, source="mqtt"):
 
     robot = robots[robot_name]
     robot["node"] = node_id
+    # An RFID report anchors the marker at this node until the next route edge is issued.
+    robot["map_edge"] = None
+    robot["display_route"] = []
     robot["last_node_update"] = datetime.now(timezone.utc).isoformat()
     robot["last_update_source"] = source
+    latest_encoder = robot.get("encoder_telemetry")
+    if latest_encoder:
+        robot["encoder_node_baseline_ticks"] = {
+            "ticks_L": latest_encoder["ticks_L"],
+            "ticks_R": latest_encoder["ticks_R"],
+        }
+    robot["distance_since_last_node_cm"] = calculate_distance_delta_cm(robot_name, 0, 0)
+    if latest_encoder:
+        latest_encoder["distance_since_last_node_cm"] = robot["distance_since_last_node_cm"]
 
     current_task = robot.get("current_task")
     if current_task and current_task["status"] == "TO_PICKUP" and node_id == current_task["PL"]:
@@ -1013,7 +1114,14 @@ def update_robot_node(robot_name, node_id, source="mqtt"):
     elif current_task:
         robot["status"] = current_task["status"]
     else:
-        robot["status"] = "IDLE"
+        idle_goal = robot.get("idle_goal")
+        if idle_goal and node_id == idle_goal:
+            robot["idle_goal"] = None
+            robot["status"] = "IDLE"
+        elif idle_goal:
+            robot["status"] = "RETURNING_TO_PARKING"
+        else:
+            robot["status"] = "IDLE"
 
     refresh_robot_projection(robot_name)
     return robot_state(robot_name)
@@ -1055,6 +1163,37 @@ def complete_current_task(robot_name):
     start_next_task(robot_name)
     rerank_robot_queue(robot_name)
     return current_task
+
+
+def cancel_current_task(robot_name, before_cancel=None):
+    """Cancel an active task before pickup, then activate the next queued task."""
+    if robot_name not in robots:
+        raise ValueError(f"Unknown robot ID: {robot_name}")
+
+    robot = robots[robot_name]
+    current_task = robot.get("current_task")
+    if not current_task:
+        raise ValueError(f"Robot '{robot_name}' has no active task to cancel")
+    if current_task.get("status") != "TO_PICKUP" or robot.get("has_payload"):
+        raise ValueError("A task can only be canceled before the robot picks up its item")
+
+    cancelled_task = dict(current_task)
+    if before_cancel:
+        before_cancel(cancelled_task)
+
+    current_task["status"] = "CANCELED"
+    robot["queue"] = [task for task in robot["queue"] if task["id"] != current_task["id"]]
+    robot.pop("current_task", None)
+    robot["has_payload"] = False
+    start_next_task(robot_name)
+    rerank_robot_queue(robot_name)
+    refresh_robot_projection(robot_name)
+
+    return {
+        "cancelled_task": cancelled_task,
+        "next_task": dict(robot["current_task"]) if robot.get("current_task") else None,
+        "robot_state": robot_state(robot_name),
+    }
 
 
 def refresh_robot_projection(robot_name):

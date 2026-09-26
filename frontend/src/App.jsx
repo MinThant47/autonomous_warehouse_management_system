@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import TaskForm from "./components/TaskForm";
+import RemainingRouteDisplay from "./features/remaining-route-display/RemainingRouteDisplay";
 import API from "./api";
 import amrWarehouseDesign from "./assets/warehouse-map/amr-warehouse.png";
 import finalYearThesisDesign from "./assets/warehouse-map/final-year-thesis.png";
@@ -162,15 +163,25 @@ function App() {
                 <article className={`robot-card ${robot.robot_id.toLowerCase()}`} key={robot.robot_id}>
                   <header className="robot-card-header">
                     <span className={`robot-dot ${robot.robot_id.toLowerCase()}`} />
-                    <div><strong>{robot.robot_id}</strong><small>{robot.status} · {robot.node}</small></div>
+                    <div><strong>{robot.robot_id}</strong><small>{robot.status === "RETURNING_TO_PARKING" ? "Returning to Parking_1" : robot.status} · {robot.node}</small></div>
                     <span>{Math.ceil(robot.estimated_seconds_until_free)}s free</span>
                   </header>
                   <dl className="robot-stats">
                     <div><dt>Current task</dt><dd>{robot.current_task_id ?? "None"}</dd></div>
                     <div><dt>Payload</dt><dd>{robot.has_payload ? "Loaded" : "Empty"}</dd></div>
                     <div><dt>Queue</dt><dd>{robot.queue_length} task{robot.queue_length === 1 ? "" : "s"}</dd></div>
+                    <div><dt>Distance since RFID</dt><dd>{robot.distance_since_last_node_cm == null ? "Waiting for encoder" : `${robot.distance_since_last_node_cm.toFixed(1)} cm${robot.encoder_distance_calibrated ? "" : " · estimate"}`}</dd></div>
+                    <div><dt>Encoder ticks</dt><dd>{robot.encoder_telemetry ? `L ${robot.encoder_telemetry.ticks_L} · R ${robot.encoder_telemetry.ticks_R}` : "No telemetry"}</dd></div>
                   </dl>
-                  <RobotQueue tasks={robot.queue} currentTaskId={robot.current_task_id} robotId={robot.robot_id} />
+                  <RobotQueue
+                    tasks={robot.queue}
+                    currentTaskId={robot.current_task_id}
+                    robotId={robot.robot_id}
+                    onRobotUpdate={(updatedRobot) => setRobots((current) => ({
+                      ...current,
+                      [updatedRobot.robot_id]: updatedRobot,
+                    }))}
+                  />
                 </article>
               ))}
             </div>
@@ -321,23 +332,64 @@ function formatWarehouseTimestamp(value) {
   }).format(date);
 }
 
-function RobotQueue({ tasks, currentTaskId, robotId }) {
+function RobotQueue({ tasks, currentTaskId, robotId, onRobotUpdate }) {
+  const [cancelNotice, setCancelNotice] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
   if (!tasks.length) return <p className="empty-queue">No assigned tasks</p>;
+  const previewReplan = async () => {
+    setPreviewLoading(true);
+    setCancelNotice("");
+    try {
+      const { data } = await API.post(`/robots/${robotId}/cancel`);
+      if (data.robot_state) onRobotUpdate(data.robot_state);
+      const plan = data.plan;
+      const route = plan?.path?.filter((node) => !node.startsWith("TEMP_ROBOT_")).join(" → ");
+      setCancelNotice(route
+        ? `${data.message} ${plan.first_action} toward ${plan.first_reentry_node}; route ${route}.`
+        : data.message || "Task canceled.");
+    } catch (requestError) {
+      const updatedRobot = requestError.response?.data?.robot_state;
+      if (updatedRobot) onRobotUpdate(updatedRobot);
+      const status = requestError.response?.status;
+      setCancelNotice(requestError.response?.data?.error || (
+        status === 404
+          ? "Cancel-and-replan endpoint not found. Restart the backend from this project."
+          : `Could not cancel and replan${status ? ` (HTTP ${status})` : ". Check the backend connection."}`
+      ));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
   return (
     <ol className="task-queue">
       {tasks.map((task) => {
         const active = task.id === currentTaskId;
+        const canCancel = active && task.status === "TO_PICKUP";
         return <li className={`task-item ${robotId.toLowerCase()} ${active ? "active-task" : ""}`} key={task.id}>
-          <div><strong>#{task.id} · {active ? "Active" : `Queue ${task.pending_rank ?? "–"}`}</strong><span>{task.status}</span></div>
+          <div className="task-item-heading">
+            <strong>#{task.id} · {active ? "Active" : `Queue ${task.pending_rank ?? "–"}`}</strong>
+            <span>{task.status}</span>
+            {active && <button
+              className="cancel-task-button"
+              type="button"
+              disabled={!canCancel || previewLoading}
+              title={canCancel ? "Cancel this task and replan for the next queued task" : "Cancel is available only during pickup"}
+              onClick={previewReplan}
+            >{previewLoading ? "Planning…" : "Cancel"}</button>}
+          </div>
           <small>{task.PL} → {task.DL} · deadline {task.deadline}s</small>
         </li>;
       })}
+      {cancelNotice && <li className="cancel-task-notice" role="status">{cancelNotice}</li>}
     </ol>
   );
 }
 
 function WarehouseMap({ map, robots }) {
   const point = ([x, y]) => ({ x, y });
+  const nodePositions = Object.fromEntries(
+    Object.entries(map.nodes).map(([node, position]) => [node, { x: position[0], y: position[1] }]),
+  );
   return (
     <svg className="warehouse-map" viewBox="0 0 108 112" role="img" aria-label="Live warehouse robot positions">
       {map.edges.map(([from, to]) => {
@@ -347,6 +399,18 @@ function WarehouseMap({ map, robots }) {
       })}
       <image href={amrWarehouseDesign} x="25" y="48.45" width="22" height="11.1" preserveAspectRatio="xMidYMid meet" aria-label="Autonomous Mobile Robot Warehouse design" />
       <image href={finalYearThesisDesign} x="61" y="48.85" width="22" height="10.3" preserveAspectRatio="xMidYMid meet" aria-label="Final Year Thesis design" />
+      {Object.values(robots).map((robot) => {
+        const position = robot.map_position || map.nodes[robot.node];
+        if (!position || !robot.display_route?.length) return null;
+        const remainingRoute = robot.display_route.filter((node) => Boolean(nodePositions[node]));
+        return <RemainingRouteDisplay
+          key={`route-${robot.robot_id}`}
+          agv={{ ...robot, x: position[0], y: position[1], display_route: remainingRoute }}
+          nodePositions={nodePositions}
+          color={robot.robot_id === "R1" ? "#f97316" : "#dc2626"}
+          width={robot.robot_id === "R1" ? 1.2 : 0.9}
+        />;
+      })}
       {Object.entries(map.nodes).map(([node, position]) => {
         const { x, y } = point(position);
         const isJunction = node.includes("_J");
@@ -359,10 +423,13 @@ function WarehouseMap({ map, robots }) {
         );
       })}
       {Object.values(robots).map((robot) => {
-        const position = map.nodes[robot.node];
+        const position = robot.map_position || map.nodes[robot.node];
         if (!position) return null;
         const { x, y } = point(position);
-        return <g key={robot.robot_id} className={`robot-marker ${robot.robot_id.toLowerCase()}`}><circle cx={x} cy={y} r="3.4" /><text x={x} y={y + 0.8}>{robot.robot_id}</text><title>{`${robot.robot_id}: ${robot.node}`}</title></g>;
+        const location = robot.map_edge
+          ? `${robot.node} → ${robot.map_edge.to_node} (${robot.distance_since_last_node_cm?.toFixed(1) ?? "?"} cm${robot.encoder_distance_calibrated ? "" : " estimated"})`
+          : robot.node;
+        return <g key={robot.robot_id} className={`robot-marker ${robot.robot_id.toLowerCase()}`}><circle cx={x} cy={y} r="3.4" /><text x={x} y={y + 0.8}>{robot.robot_id}</text><title>{`${robot.robot_id}: ${location}`}</title></g>;
       })}
     </svg>
   );

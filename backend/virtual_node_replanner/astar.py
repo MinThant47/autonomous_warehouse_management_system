@@ -1,5 +1,6 @@
 import heapq
 
+
 def heuristic(graph, current, goal):
 
     x1, y1 = graph.get_position(current)
