@@ -15,16 +15,21 @@ function App() {
   const [activeSidebarTab, setActiveSidebarTab] = useState("monitor");
   const [warehouseAlert, setWarehouseAlert] = useState(null);
   const [cameraUrl, setCameraUrl] = useState("");
+  const [trafficControlEnabled, setTrafficControlEnabled] = useState(null);
+  const [trafficControlBusy, setTrafficControlBusy] = useState(false);
+  const [trafficControlError, setTrafficControlError] = useState("");
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [{ data: mapData }, { data: robotData }] = await Promise.all([
+        const [{ data: mapData }, { data: robotData }, { data: trafficData }] = await Promise.all([
           API.get("/map"),
           API.get("/robots"),
+          API.get("/traffic-control"),
         ]);
         setMap(mapData);
         setRobots(robotData);
+        setTrafficControlEnabled(trafficData.enabled);
         setError("");
       } catch {
         setError("Waiting for the backend at http://localhost:8000");
@@ -75,6 +80,11 @@ function App() {
       setRobots((current) => ({ ...current, [robot.robot_id]: robot }));
       setError("");
     });
+    events.addEventListener("traffic-control", (event) => {
+      const state = JSON.parse(event.data);
+      setTrafficControlEnabled(state.enabled);
+      setTrafficControlError("");
+    });
     events.addEventListener("warehouse-alert", (event) => {
       const alert = JSON.parse(event.data);
       const alertTitles = {
@@ -91,6 +101,27 @@ function App() {
     return () => events.close();
   }, []);
 
+  const toggleTrafficControl = async () => {
+    if (trafficControlEnabled === null || trafficControlBusy) return;
+    setTrafficControlBusy(true);
+    setTrafficControlError("");
+    try {
+      const { data } = await API.post("/traffic-control", {
+        enabled: !trafficControlEnabled,
+      });
+      setTrafficControlEnabled(data.enabled);
+      if (data.errors?.length) {
+        setTrafficControlError(data.errors.map((item) => `${item.robot_id}: ${item.error}`).join("; "));
+      }
+    } catch (requestError) {
+      const data = requestError.response?.data;
+      if (typeof data?.enabled === "boolean") setTrafficControlEnabled(data.enabled);
+      setTrafficControlError(data?.error || "Could not update traffic control");
+    } finally {
+      setTrafficControlBusy(false);
+    }
+  };
+
   return (
     <main className="dashboard">
       <section className="map-panel">
@@ -101,6 +132,16 @@ function App() {
           </div>
           <div className="header-meta">
             <span className={error ? "connection offline" : "connection"}><i />{error || "Live MQTT connection"}</span>
+            <button
+              className={`traffic-control-toggle ${trafficControlEnabled ? "enabled" : "disabled"}`}
+              type="button"
+              aria-pressed={trafficControlEnabled === true}
+              disabled={trafficControlEnabled === null || trafficControlBusy}
+              onClick={toggleTrafficControl}
+              title="When off, robot positions are still reported and shown, but cross-robot reservations are bypassed."
+            >
+              Traffic Control: {trafficControlEnabled === null ? "Loading…" : trafficControlEnabled ? "ON" : "OFF"}
+            </button>
             <a className="object-detection-link" href={`http://${window.location.hostname || "localhost"}:8000/object-detection/`}>
               Live View
             </a>
@@ -115,6 +156,7 @@ function App() {
             </button>
           </div>
         </div>
+        {trafficControlError && <p className="traffic-control-error" role="alert">{trafficControlError}</p>}
         {activeSidebarTab === "warehouse" ? (
           <WarehouseMonitor warehouse={warehouse} map={map} error={warehouseError} />
         ) : activeSidebarTab === "task" ? (
@@ -163,16 +205,22 @@ function App() {
                 <article className={`robot-card ${robot.robot_id.toLowerCase()}`} key={robot.robot_id}>
                   <header className="robot-card-header">
                     <span className={`robot-dot ${robot.robot_id.toLowerCase()}`} />
-                    <div><strong>{robot.robot_id}</strong><small>{robot.status === "RETURNING_TO_PARKING" ? "Returning to Parking_1" : robot.status} · {robot.node}</small></div>
+                    <div><strong>{robot.robot_id}</strong><small>{robot.waiting_for_traffic ? "Waiting for traffic" : robot.status === "RETURNING_TO_PARKING" ? `Returning to ${robot.idle_goal || "parking"}` : robot.status} · {robot.node}</small></div>
                     <span>{Math.ceil(robot.estimated_seconds_until_free)}s free</span>
                   </header>
                   <dl className="robot-stats">
                     <div><dt>Current task</dt><dd>{robot.current_task_id ?? "None"}</dd></div>
+                    <div><dt>Facing</dt><dd>{robot.heading_label ?? "Unknown"}</dd></div>
                     <div><dt>Payload</dt><dd>{robot.has_payload ? "Loaded" : "Empty"}</dd></div>
                     <div><dt>Queue</dt><dd>{robot.queue_length} task{robot.queue_length === 1 ? "" : "s"}</dd></div>
                     <div><dt>Distance since RFID</dt><dd>{robot.distance_since_last_node_cm == null ? "Waiting for encoder" : `${robot.distance_since_last_node_cm.toFixed(1)} cm${robot.encoder_distance_calibrated ? "" : " · estimate"}`}</dd></div>
                     <div><dt>Encoder ticks</dt><dd>{robot.encoder_telemetry ? `L ${robot.encoder_telemetry.ticks_L} · R ${robot.encoder_telemetry.ticks_R}` : "No telemetry"}</dd></div>
                   </dl>
+                  <a
+                    className="mission-history-download"
+                    href={`${API.defaults.baseURL}/robots/${robot.robot_id}/mission-history.csv`}
+                    download
+                  >Download mission history CSV</a>
                   <RobotQueue
                     tasks={robot.queue}
                     currentTaskId={robot.current_task_id}
@@ -181,6 +229,10 @@ function App() {
                       ...current,
                       [updatedRobot.robot_id]: updatedRobot,
                     }))}
+                  />
+                  <CompletedMissionHistory
+                    robotId={robot.robot_id}
+                    refreshKey={`${robot.current_task_id ?? "none"}:${(robot.queue || []).map((task) => `${task.id}:${task.status}`).join(",")}`}
                   />
                 </article>
               ))}
@@ -378,10 +430,60 @@ function RobotQueue({ tasks, currentTaskId, robotId, onRobotUpdate }) {
             >{previewLoading ? "Planning…" : "Cancel"}</button>}
           </div>
           <small>{task.PL} → {task.DL} · deadline {task.deadline}s</small>
+          {task.mission_id && <a
+            className="mission-history-download"
+            href={`${API.defaults.baseURL}/robots/${robotId}/mission-history.csv?mission_id=${encodeURIComponent(task.mission_id)}`}
+            download
+          >Download this mission CSV</a>}
         </li>;
       })}
       {cancelNotice && <li className="cancel-task-notice" role="status">{cancelNotice}</li>}
     </ol>
+  );
+}
+
+function CompletedMissionHistory({ robotId, refreshKey }) {
+  const [missions, setMissions] = useState([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    API.get(`/robots/${robotId}/completed-missions`)
+      .then(({ data }) => {
+        if (!active) return;
+        setMissions(data.missions || []);
+        setError("");
+      })
+      .catch(() => {
+        if (active) setError("Mission history is unavailable");
+      });
+    return () => { active = false; };
+  }, [robotId, refreshKey]);
+
+  return (
+    <section className="completed-mission-history" aria-label={`${robotId} completed mission history`}>
+      <strong>Completed missions</strong>
+      {error ? <p className="empty-queue">{error}</p> : missions.length === 0 ? (
+        <p className="empty-queue">No completed missions yet</p>
+      ) : (
+        <ul>
+          {missions.map((mission) => (
+            <li key={mission.mission_id}>
+              <div>
+                <strong>#{mission.task_id ?? "—"} · {mission.serial_number || "Mission"}</strong>
+                <small>{mission.pickup_node || "—"} → {mission.destination_node || "—"}</small>
+                <time dateTime={mission.completed_at}>Completed {formatWarehouseTimestamp(mission.completed_at)}</time>
+              </div>
+              <a
+                className="mission-history-download"
+                href={`${API.defaults.baseURL}/robots/${robotId}/mission-history.csv?mission_id=${encodeURIComponent(mission.mission_id)}`}
+                download
+              >Download CSV</a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

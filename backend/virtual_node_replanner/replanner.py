@@ -53,19 +53,30 @@ class VirtualNodeReplanner:
         self.blocked_edges = blocked_edges or set()
         self.blocked_nodes = blocked_nodes or set()
 
-    def replan(self, state: AGVState, backward_penalty_cm: float) -> dict:
+    def replan(
+        self,
+        state: AGVState,
+        backward_penalty_cm: float,
+        blocked_edges=None,
+        blocked_nodes=None,
+    ) -> dict:
         total_started = time.perf_counter()
         preparation_started = total_started
+        active_blocked_edges = set(self.blocked_edges if blocked_edges is None else blocked_edges)
+        active_blocked_nodes = set(self.blocked_nodes if blocked_nodes is None else blocked_nodes)
         working_graph = self.graph.clone()
-        for node_a, node_b in self.blocked_edges:
+        for node_a, node_b in active_blocked_edges:
             working_graph.remove_edge(node_a, node_b)
-        for blocked_node in self.blocked_nodes:
+        for blocked_node in active_blocked_nodes:
             for neighbor, _ in list(working_graph.graph.get(blocked_node, [])):
                 working_graph.remove_edge(blocked_node, neighbor)
         temporary_node = "TEMP_ROBOT_%s" % state.robot_id
         working_graph.add_temp_node(temporary_node, *state.current_position)
         working_graph.connect_temp_node(
-            state.previous_node, state.next_node, temporary_node
+            state.previous_node,
+            state.next_node,
+            temporary_node,
+            blocked_nodes=active_blocked_nodes,
         )
         applied_penalty = _backward_penalty(self.graph, state, backward_penalty_cm)
         if applied_penalty:

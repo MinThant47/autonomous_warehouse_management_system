@@ -37,6 +37,11 @@ def publish_robot_state(state):
     _publish({"event": "robot-state", "data": state})
 
 
+def publish_traffic_control_state(enabled):
+    """Broadcast whether cross-robot traffic reservations are enabled."""
+    _publish({"event": "traffic-control", "data": {"enabled": enabled}})
+
+
 def publish_warehouse_alert(message, serial_code=None):
     """Notify dashboards when an inbound QR report cannot create a task."""
     if "already in inventory" in message:

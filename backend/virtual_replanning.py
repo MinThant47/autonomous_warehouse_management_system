@@ -4,6 +4,7 @@ import math
 import time
 
 from new_warehouse_map import G, nodes
+from realtime_navigation import movement_action_for_vectors
 from virtual_node_replanner import AGVState, VirtualNodeReplanner
 
 
@@ -48,9 +49,12 @@ class WarehouseGraphAdapter:
         self.nodes[node] = {"x": x, "y": y}
         self.graph[node] = []
 
-    def connect_temp_node(self, node_a, node_b, temporary_node):
+    def connect_temp_node(self, node_a, node_b, temporary_node, blocked_nodes=None):
         temp_x, temp_y = self.get_position(temporary_node)
+        blocked_nodes = blocked_nodes or set()
         for endpoint in (node_a, node_b):
+            if endpoint in blocked_nodes:
+                continue
             end_x, end_y = self.get_position(endpoint)
             cost = abs(temp_x - end_x) + abs(temp_y - end_y)
             self.graph[temporary_node].append((endpoint, cost))
@@ -71,7 +75,10 @@ class LiveVirtualReplanner:
     def __init__(self):
         self._replanner = VirtualNodeReplanner(WarehouseGraphAdapter())
 
-    def plan_from_encoder(self, robot_id, last_node, next_node, distance_from_last_cm, destination):
+    def plan_from_encoder(
+        self, robot_id, last_node, next_node, distance_from_last_cm, destination,
+        heading_degrees=None, blocked_edges=None, blocked_nodes=None,
+    ):
         if last_node not in nodes or next_node not in nodes or destination not in nodes:
             raise ValueError("Current edge and destination must be warehouse map nodes")
         if not G.has_edge(last_node, next_node):
@@ -96,7 +103,16 @@ class LiveVirtualReplanner:
             x1 * CM_PER_MAP_UNIT + (dx / edge_length_cm) * progress_cm,
             y1 * CM_PER_MAP_UNIT + (dy / edge_length_cm) * progress_cm,
         )
-        heading = math.degrees(math.atan2(dy, dx))
+        # Heading is the direction the AGV's front faces. Reverse travel does
+        # not change it, so prefer the heading confirmed by robot-state updates.
+        # The edge direction is only a compatibility fallback for older callers.
+        heading = (
+            float(heading_degrees)
+            if heading_degrees is not None
+            else math.degrees(math.atan2(dy, dx))
+        )
+        if not math.isfinite(heading):
+            raise ValueError("Robot heading must be a finite number")
         state = AGVState(
             robot_id=robot_id,
             previous_node=last_node,
@@ -108,14 +124,24 @@ class LiveVirtualReplanner:
             current_position=current_position,
             simulation_time=time.monotonic(),
         )
-        result = self._replanner.replan(state, BACKWARD_PENALTY_CM)
+        result = self._replanner.replan(
+            state,
+            BACKWARD_PENALTY_CM,
+            blocked_edges=blocked_edges,
+            blocked_nodes=blocked_nodes,
+        )
         if result["success"]:
             result["first_reentry_node"] = result["path"][1] if len(result["path"]) > 1 else None
-            result["first_action"] = (
-                "FORWARD" if result["first_reentry_node"] == next_node
-                else "TURN_BACK" if result["first_reentry_node"] == last_node
-                else None
-            )
+            if result["first_reentry_node"] in nodes:
+                reentry_x, reentry_y = nodes[result["first_reentry_node"]]
+                movement_vector = (
+                    reentry_x * CM_PER_MAP_UNIT - current_position[0],
+                    reentry_y * CM_PER_MAP_UNIT - current_position[1],
+                )
+                heading_vector = (math.cos(math.radians(heading)), math.sin(math.radians(heading)))
+                result["first_action"] = movement_action_for_vectors(heading_vector, movement_vector)
+            else:
+                result["first_action"] = None
         result["state"] = {
             "robot_id": robot_id,
             "last_rfid_node": last_node,

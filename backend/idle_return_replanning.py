@@ -1,4 +1,4 @@
-"""Interrupt an idle parking return when new work is assigned to that AGV."""
+"""Start work from a home pose or interrupt a robot's idle parking return."""
 
 from encoder_distance import is_encoder_calibrated
 from new_warehouse_map import nodes
@@ -6,12 +6,46 @@ from scheduler.scheduler import robot_state, robots
 
 
 def replan_interrupted_idle_return(result, command_planner, replanner, publish_command):
-    """Replan the newly assigned task from the robot's latest encoder position.
+    """Start a home-station task or replan it from the latest encoder position.
 
     A task remains assigned if replanning or MQTT publishing fails. In that
     case the old parking motion is stopped where possible and the result
     includes an error for the caller to report.
     """
+    if result.get("started_from_home"):
+        robot_id = result["assigned_robot"]
+        robot = robots[robot_id]
+        task = robot.get("current_task")
+        if not task:
+            return {"error": "The assigned robot has no active task to start."}
+        command = command_planner.command_for_node(
+            robot_id,
+            robot["node"],
+            task["PL"],
+            "PICKUP",
+            heading_vector=robot.get("heading_vector"),
+        )
+        try:
+            topic = publish_command(robot_id, command)
+        except RuntimeError as exception:
+            return {"error": f"The task is active, but its first movement could not be sent: {exception}"}
+        next_node = command.get("next_node")
+        robot["map_edge"] = (
+            {"from_node": robot["node"], "to_node": next_node, "distance_origin_cm": 0.0}
+            if next_node in nodes
+            else None
+        )
+        path = command.get("path", [])
+        route = path[1:] if path and path[0] == robot["node"] else path
+        robot["display_route"] = [node for node in route if node in nodes]
+        result["robot_state"] = robot_state(robot_id)
+        return {
+            "command": command,
+            "command_topic": topic,
+            "waiting_for_traffic": topic is None,
+            "robot_state": result["robot_state"],
+        }
+
     if not result.get("interrupted_idle_return"):
         return None
 
@@ -60,6 +94,7 @@ def replan_interrupted_idle_return(result, command_planner, replanner, publish_c
                 edge["next_node"],
                 distance_cm,
                 task["PL"],
+                heading_degrees=robot.get("heading_degrees"),
             )
             if not plan.get("success") or not plan.get("first_action") or not plan.get("first_reentry_node"):
                 error = "The replanner could not produce a safe first movement."
@@ -69,6 +104,7 @@ def replan_interrupted_idle_return(result, command_planner, replanner, publish_c
     stop_command = {
         "action": "STOP",
         "task": "NONE",
+        "forklift_task": "NONE",
         "current_node": robot["node"],
         "next_node": None,
         "goal": None,
@@ -89,6 +125,7 @@ def replan_interrupted_idle_return(result, command_planner, replanner, publish_c
     command = {
         "action": plan["first_action"],
         "task": "PICKUP",
+        "forklift_task": "NONE",
         "current_node": edge["last_node"],
         "next_node": plan["first_reentry_node"],
         "goal": task["PL"],
@@ -126,5 +163,6 @@ def replan_interrupted_idle_return(result, command_planner, replanner, publish_c
         "plan": plan,
         "command": command,
         "command_topic": topic,
+        "waiting_for_traffic": topic is None,
         "robot_state": result["robot_state"],
     }

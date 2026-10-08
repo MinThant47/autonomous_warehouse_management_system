@@ -13,8 +13,16 @@ from flask_cors import CORS
 from waitress import serve
 from object_detection.object_detection_app import object_detection_bp
 from scheduler.scheduler import cancel_current_task, dispatch_task, robot_state, robots, update_robot_node
+from robot_config import ROBOT_HOME_NODES
+from mission_history import export_mission_history_csv, read_completed_missions, read_mission_history
 from new_warehouse_map import edges, nodes
-from realtime_mqtt_gateway import COMMAND_PLANNER, publish_robot_command, start_realtime_mqtt_gateway
+from realtime_mqtt_gateway import (
+    COMMAND_PLANNER,
+    TRAFFIC_MANAGER,
+    publish_robot_command,
+    set_traffic_control_enabled,
+    start_realtime_mqtt_gateway,
+)
 from encoder_distance import is_encoder_calibrated
 from virtual_replanning import CM_PER_MAP_UNIT, LiveVirtualReplanner
 from idle_return_replanning import replan_interrupted_idle_return
@@ -204,6 +212,51 @@ def get_robots():
     return jsonify({robot_id: robot_state(robot_id) for robot_id in robots})
 
 
+@app.route("/traffic-control", methods=["GET"])
+def get_traffic_control():
+    return jsonify({"enabled": TRAFFIC_MANAGER.enabled})
+
+
+@app.route("/traffic-control", methods=["POST"])
+def update_traffic_control():
+    data = request.get_json(silent=True) or {}
+    enabled = data.get("enabled")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "enabled must be a boolean"}), 400
+    try:
+        result = set_traffic_control_enabled(enabled)
+    except ValueError as error:
+        return jsonify({"error": str(error), "enabled": TRAFFIC_MANAGER.enabled}), 409
+    status = 503 if result["errors"] else 200
+    return jsonify(result), status
+
+
+@app.route("/robots/<robot_id>/mission-history.csv")
+def download_robot_mission_history(robot_id):
+    """Download one robot's persisted mission events, optionally for one mission ID."""
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+    mission_id = request.args.get("mission_id")
+    rows = read_mission_history(robot_id, mission_id)
+    if not rows:
+        return jsonify({"error": "No recorded mission history was found for this selection."}), 404
+    csv_text = export_mission_history_csv(robot_id, mission_id)
+    filename = f"{robot_id.lower()}_mission_history.csv"
+    return Response(
+        csv_text,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route("/robots/<robot_id>/completed-missions")
+def get_completed_missions(robot_id):
+    """List completed missions so their persisted CSV exports remain discoverable."""
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+    return jsonify({"missions": read_completed_missions(robot_id)})
+
+
 @app.route("/robots/<robot_id>/node", methods=["POST"])
 def report_robot_node(robot_id):
     """HTTP test equivalent of an MQTT node report."""
@@ -263,6 +316,7 @@ def preview_cancel_replan(robot_id):
             next_node=edge["next_node"],
             distance_from_last_cm=distance_cm,
             destination=pending_tasks[0]["PL"],
+            heading_degrees=robot.get("heading_degrees"),
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 409
@@ -290,7 +344,7 @@ def cancel_and_replan(robot_id):
         return jsonify({"error": "A task can only be canceled during pickup"}), 409
 
     pending = [task for task in robot["queue"] if task["id"] != current_task["id"]]
-    destination = pending[0]["PL"] if pending else "Parking_1"
+    destination = pending[0]["PL"] if pending else ROBOT_HOME_NODES[robot_id]
 
     edge = COMMAND_PLANNER.current_edge_for_robot(robot_id)
     at_known_parking_start = False
@@ -307,7 +361,8 @@ def cancel_and_replan(robot_id):
         return jsonify({"error": "No encoder distance is available yet"}), 409
     try:
         plan = VIRTUAL_REPLANNER.plan_from_encoder(
-            robot_id, edge["last_node"], edge["next_node"], distance_cm, destination
+            robot_id, edge["last_node"], edge["next_node"], distance_cm, destination,
+            heading_degrees=robot.get("heading_degrees"),
         )
         if at_known_parking_start and robot["node"] == destination and distance_cm == 0:
             # The manually established startup pose is already the requested idle location.
@@ -317,7 +372,7 @@ def cancel_and_replan(robot_id):
             return jsonify({"error": "The replanner could not produce a safe first movement"}), 409
 
         stop_command = {
-            "action": "STOP", "task": "NONE", "current_node": robot["node"],
+            "action": "STOP", "task": "NONE", "forklift_task": "NONE", "current_node": robot["node"],
             "next_node": None, "goal": None, "path": [], "previous_node": edge.get("previous_node"),
         }
         publish_robot_command(robot_id, stop_command)
@@ -347,6 +402,7 @@ def cancel_and_replan(robot_id):
         command = {
             "action": plan["first_action"],
             "task": "IDLE",
+            "forklift_task": "NONE",
             "current_node": edge["last_node"],
             "next_node": plan["first_reentry_node"],
             "goal": destination,
@@ -357,6 +413,7 @@ def cancel_and_replan(robot_id):
         command = {
             "action": plan["first_action"],
             "task": "PICKUP",
+            "forklift_task": "NONE",
             "current_node": edge["last_node"],
             "next_node": plan["first_reentry_node"],
             "goal": next_task["PL"],
@@ -377,8 +434,6 @@ def cancel_and_replan(robot_id):
         route_node for route_node in command.get("path", [])
         if route_node in nodes
     ]
-    result["robot_state"] = robot_state(robot_id)
-    publish_robot_state(result["robot_state"])
     try:
         topic = publish_robot_command(robot_id, command)
     except RuntimeError as error:
@@ -390,12 +445,22 @@ def cancel_and_replan(robot_id):
             "plan": plan,
         }), 503
 
+    result["robot_state"] = robot_state(robot_id)
+    publish_robot_state(result["robot_state"])
+    if next_task is None:
+        message = (
+            f"Task canceled; the robot is returning to {destination}."
+            if topic is not None
+            else "Task canceled; the return route is waiting for a traffic reservation."
+        )
+    else:
+        message = (
+            "Task canceled; the next queued task was replanned and dispatched."
+            if topic is not None
+            else "Task canceled; the replanned task is waiting for a traffic reservation."
+        )
     return jsonify({
-        "message": (
-            "Task canceled; the robot is returning to Parking_1."
-            if next_task is None
-            else "Task canceled; the next queued task was replanned and dispatched."
-        ),
+        "message": message,
         "cancelled_task": result["cancelled_task"],
         "next_task": next_task,
         "robot_state": result["robot_state"],
