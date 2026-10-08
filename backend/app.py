@@ -12,7 +12,7 @@ from flask import Flask, Response, request, jsonify, stream_with_context
 from flask_cors import CORS
 from waitress import serve
 from object_detection.object_detection_app import object_detection_bp
-from scheduler.scheduler import cancel_current_task, dispatch_task, robot_state, robots, update_robot_node
+from scheduler.scheduler import cancel_current_task, dispatch_task, refresh_robot_projection, robot_state, robots, update_robot_node
 from robot_config import ROBOT_HOME_NODES
 from mission_history import export_mission_history_csv, read_completed_missions, read_mission_history
 from new_warehouse_map import edges, nodes
@@ -210,6 +210,41 @@ def get_tasks():
 @app.route("/robots")
 def get_robots():
     return jsonify({robot_id: robot_state(robot_id) for robot_id in robots})
+
+
+@app.route("/robots/<robot_id>/queue/reorder", methods=["POST"])
+def reorder_robot_queue(robot_id):
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+    robot = robots[robot_id]
+    current_task = robot.get("current_task")
+    if not current_task or current_task.get("status") != "TO_PICKUP" or robot.get("has_payload"):
+        return jsonify({"error": "Tasks can only be reordered while the active task is going to pickup."}), 409
+
+    data = request.get_json(silent=True) or {}
+    requested_ids = data.get("task_ids")
+    manually_moved_task_id = data.get("manually_moved_task_id")
+    queued = robot["queue"][1:]
+    queued_ids = [task["id"] for task in queued]
+    if not isinstance(requested_ids, list) or len(requested_ids) != len(queued_ids) or set(requested_ids) != set(queued_ids):
+        return jsonify({"error": "task_ids must contain each queued task exactly once."}), 400
+
+    by_id = {task["id"]: task for task in queued}
+    if manually_moved_task_id not in by_id:
+        return jsonify({"error": "manually_moved_task_id must identify a queued task."}), 400
+    new_queued = [by_id[task_id] for task_id in requested_ids]
+    for task in queued:
+        task["previous_pending_rank"] = task.get("pending_rank")
+    for position, task in enumerate(new_queued, start=1):
+        old_position = queued_ids.index(task["id"]) + 1
+        task["pending_rank"] = position
+        task["rank_delta"] = old_position - position
+        task["rank_move"] = "up" if position < old_position else "down" if position > old_position else "same"
+        if task["id"] == manually_moved_task_id:
+            task["manual_ordered"] = True
+    robot["queue"] = [robot["queue"][0], *new_queued]
+    refresh_robot_projection(robot_id)
+    return jsonify({"robot_state": robot_state(robot_id)})
 
 
 @app.route("/traffic-control", methods=["GET"])

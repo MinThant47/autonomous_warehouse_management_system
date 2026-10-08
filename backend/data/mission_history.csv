@@ -29278,3 +29278,7 @@ a054cc2a-3547-41f3-8777-1f058255f4f4,R2,3,R0007,1,Parking_2,Orange_7,Gate_3,miss
 1ee4dfdb-651d-43f6-be6e-82d796b1c718,R1,2,E0001,1,Parking_1,Yellow_1,Gate_3,encoder_reading,2026-10-04T10:52:10.809604+00:00,TO_PICKUP,Yellow_3_J,mqtt-telemetry,25459,25459,17.325,True
 1ee4dfdb-651d-43f6-be6e-82d796b1c718,R1,2,E0001,1,Parking_1,Yellow_1,Gate_3,mission_canceled,2026-10-04T10:52:10.814591+00:00,CANCELED,Yellow_3_J,mqtt-rfid,25459,25459,17.325,True
 be5b3859-fce1-43e8-954c-a100e238535b,R1,1,E0001,1,Parking_1,Yellow_1,Gate_3,mission_started,2026-10-05T05:27:35.535609+00:00,TO_PICKUP,Parking_1,,,,,
+30a25bec-06f9-4cc3-a9b4-2f3c6231aa0b,R1,1,E0001,2,Parking_1,Yellow_1,Yellow_4,mission_started,2026-10-08T03:05:22.381311+00:00,TO_PICKUP,Parking_1,,,,,
+57249ae9-22d7-41d0-b726-8c0cc47dc447,R2,2,E0001,2,Parking_2,Yellow_4,Yellow_4,mission_started,2026-10-08T03:05:25.555785+00:00,TO_PICKUP,Parking_2,,,,,
+ec8fce21-2212-4990-846b-335e98ab9209,R1,1,E0001,2,Parking_1,Yellow_3,Yellow_1,mission_started,2026-10-08T03:08:43.715686+00:00,TO_PICKUP,Parking_1,,,,,
+7f8cf3fa-1b31-4d03-9384-0df1bb920bcb,R2,2,F0001,2,Parking_2,Purple_5,Purple_1,mission_started,2026-10-08T03:08:48.876500+00:00,TO_PICKUP,Parking_2,,,,,

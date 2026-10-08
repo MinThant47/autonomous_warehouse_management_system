@@ -210,6 +210,10 @@ def build_ranker_feature_rows(robot_name):
         fixed_prefix = [robot["queue"][0]]
         pending_tasks = robot["queue"][1:]
 
+    # User-positioned tasks keep their slots when new work is automatically
+    # ranked; the ranker only compares tasks the user has not pinned.
+    pending_tasks = [task for task in pending_tasks if not task.get("manual_ordered")]
+
     if len(pending_tasks) <= 1:
         return pd.DataFrame()
 
@@ -599,6 +603,8 @@ def rerank_robot_queue(robot_name):
         fixed_prefix = [robot["queue"][0]]
         pending_tasks = robot["queue"][1:]
 
+    pending_tasks = [task for task in pending_tasks if not task.get("manual_ordered")]
+
     before_pending_positions = {
         task["id"]: position
         for position, task in enumerate(pending_tasks, start=1)
@@ -723,7 +729,12 @@ def rerank_robot_queue(robot_name):
         ascending=False
     )
 
-    robot["queue"] = fixed_prefix + list(df["task"])
+    ranked_tasks = iter(list(df["task"]))
+    ranked_ids = {task["id"] for task in pending_tasks}
+    robot["queue"] = fixed_prefix + [
+        next(ranked_tasks) if task["id"] in ranked_ids else task
+        for task in robot["queue"][len(fixed_prefix):]
+    ]
 
     for rank, task in enumerate(robot["queue"], start=1):
         task["sequence_rank"] = rank

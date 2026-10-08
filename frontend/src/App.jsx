@@ -387,6 +387,8 @@ function formatWarehouseTimestamp(value) {
 function RobotQueue({ tasks, currentTaskId, robotId, onRobotUpdate }) {
   const [cancelNotice, setCancelNotice] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [draggedTaskId, setDraggedTaskId] = useState(null);
+  const [reorderLoading, setReorderLoading] = useState(false);
   if (!tasks.length) return <p className="empty-queue">No assigned tasks</p>;
   const previewReplan = async () => {
     setPreviewLoading(true);
@@ -412,14 +414,45 @@ function RobotQueue({ tasks, currentTaskId, robotId, onRobotUpdate }) {
       setPreviewLoading(false);
     }
   };
+  const canReorder = tasks.some((task) => task.id === currentTaskId && task.status === "TO_PICKUP");
+  const reorder = async (targetTaskId) => {
+    if (!canReorder || draggedTaskId == null || draggedTaskId === targetTaskId || reorderLoading) return;
+    const activeTask = tasks.find((task) => task.id === currentTaskId);
+    const queued = tasks.filter((task) => task.id !== activeTask?.id);
+    const from = queued.findIndex((task) => task.id === draggedTaskId);
+    const to = queued.findIndex((task) => task.id === targetTaskId);
+    if (from < 0 || to < 0) return;
+    const [moved] = queued.splice(from, 1);
+    queued.splice(to, 0, moved);
+    setReorderLoading(true);
+    setCancelNotice("");
+    try {
+      const { data } = await API.post(`/robots/${robotId}/queue/reorder`, { task_ids: queued.map((task) => task.id), manually_moved_task_id: draggedTaskId });
+      if (data.robot_state) onRobotUpdate(data.robot_state);
+    } catch (requestError) {
+      setCancelNotice(requestError.response?.data?.error || "Could not reorder tasks. Refresh the robot monitor and try again.");
+    } finally {
+      setReorderLoading(false);
+      setDraggedTaskId(null);
+    }
+  };
   return (
     <ol className="task-queue">
       {tasks.map((task) => {
         const active = task.id === currentTaskId;
         const canCancel = active && task.status === "TO_PICKUP";
-        return <li className={`task-item ${robotId.toLowerCase()} ${active ? "active-task" : ""}`} key={task.id}>
+        const draggable = canReorder && !active && !reorderLoading;
+        return <li className={`task-item ${robotId.toLowerCase()} ${active ? "active-task" : ""} ${task.rank_move && task.rank_move !== "same" ? `rank-${task.rank_move}` : ""} ${draggable ? "draggable-task" : ""}`}
+          key={task.id} draggable={draggable}
+          onDragStart={(event) => { setDraggedTaskId(task.id); event.dataTransfer.effectAllowed = "move"; }}
+          onDragEnd={() => setDraggedTaskId(null)}
+          onDragOver={(event) => { if (draggable && draggedTaskId != null) event.preventDefault(); }}
+          onDrop={(event) => { event.preventDefault(); reorder(task.id); }}>
           <div className="task-item-heading">
-            <strong>#{task.id} · {active ? "Active" : `Queue ${task.pending_rank ?? "–"}`}</strong>
+            <strong className="task-identity">
+              {!active && <span className={`task-drag-handle ${canReorder ? "available" : "locked"}`} aria-label={canReorder ? "Drag to reorder task" : "Reordering unavailable while robot is carrying a load"} title={canReorder ? "Drag to reorder" : "Reordering unavailable while robot is carrying a load"}><i /><i /><i /><i /><i /><i /></span>}
+              <span>#{task.id} · {active ? "Active" : `Queue ${task.pending_rank ?? "–"}`}</span>
+            </strong>
             <span>{task.status}</span>
             {active && <button
               className="cancel-task-button"
@@ -430,13 +463,9 @@ function RobotQueue({ tasks, currentTaskId, robotId, onRobotUpdate }) {
             >{previewLoading ? "Planning…" : "Cancel"}</button>}
           </div>
           <small>{task.PL} → {task.DL} · deadline {task.deadline}s</small>
-          {task.mission_id && <a
-            className="mission-history-download"
-            href={`${API.defaults.baseURL}/robots/${robotId}/mission-history.csv?mission_id=${encodeURIComponent(task.mission_id)}`}
-            download
-          >Download this mission CSV</a>}
         </li>;
       })}
+      {canReorder && <li className="queue-reorder-hint" role="note">Drag queued tasks to change their order{reorderLoading ? "…" : ""}</li>}
       {cancelNotice && <li className="cancel-task-notice" role="status">{cancelNotice}</li>}
     </ol>
   );

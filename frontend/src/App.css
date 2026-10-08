@@ -45,3 +45,28 @@ h1 { color: #172033; }
 .warehouse-monitor, .warehouse-locations-only { min-width: 0; overflow-x: hidden; overflow-y: auto; }
 .warehouse-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 1050px) { .warehouse-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.task-queue li.draggable-task { cursor: grab; }
+.task-queue li.draggable-task:active { cursor: grabbing; }
+.task-drag-handle { color: #8491a5; font-size: 17px; vertical-align: -1px; }
+.queue-reorder-hint { color: #667085; font-size: 10px; padding: 2px 4px; }
+.task-queue li.rank-up { animation: queue-move-up 420ms ease-out; }
+.task-queue li.rank-down { animation: queue-move-down 420ms ease-out; }
+@keyframes queue-move-up { from { transform: translateY(14px); background-color: #dcfce7; } to { transform: translateY(0); } }
+@keyframes queue-move-down { from { transform: translateY(-14px); background-color: #fff1d6; } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .task-queue li.rank-up, .task-queue li.rank-down { animation: none; } }
+.task-queue { gap: 9px; max-height: 280px; padding: 2px 5px 4px 1px; }
+.task-queue li { padding: 10px 11px; border-radius: 7px; }
+.task-queue li .task-item-heading { min-height: 24px; justify-content: flex-start; gap: 10px; }
+.task-queue li .task-item-heading > span { margin-left: auto; padding: 3px 7px; border-radius: 999px; background: #e9eef6; color: #475569; font-size: 10px; white-space: nowrap; }
+.task-queue li.active-task .task-item-heading > span { background: #ffedd5; color: #9a3412; }
+.task-queue li small { margin-top: 6px; color: #475569; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.task-identity { display: inline-flex; align-items: center; gap: 9px; color: #25324a; font-size: 12px; }
+.task-identity > span { color: inherit !important; font-size: 12px !important; }
+.task-drag-handle { display: grid; grid-template-columns: repeat(2, 3px); gap: 3px; align-content: center; justify-content: center; width: 24px; height: 26px; flex: 0 0 24px; border: 1px solid #d8e0eb; border-radius: 5px; background: #fff; cursor: grab; }
+.task-drag-handle i { width: 3px; height: 3px; border-radius: 50%; background: #728096; }
+.task-drag-handle.available { border-color: #b9c9e2; background: #f8fbff; }
+.task-drag-handle.available:hover { border-color: #2563eb; background: #eff6ff; }
+.task-drag-handle.locked { opacity: .52; cursor: not-allowed; }
+.task-queue li.draggable-task { border-left-color: #93b4e8; }
+.task-queue li.draggable-task:hover { background: #f1f6ff; }
+.queue-reorder-hint { padding: 3px 6px !important; font-size: 11px !important; }
