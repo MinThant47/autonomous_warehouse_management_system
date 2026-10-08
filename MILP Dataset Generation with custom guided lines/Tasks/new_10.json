@@ -1,0 +1,92 @@
+[
+    {
+        "id": 1,
+        "type": 3,
+        "PL": "Green_4",
+        "DL": "Yellow_2",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 2,
+        "type": 1,
+        "PL": "Gate_2",
+        "DL": "Green_3",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 3,
+        "type": 3,
+        "PL": "Purple_5",
+        "DL": "Green_6",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 4,
+        "type": 1,
+        "PL": "Gate_1",
+        "DL": "Green_7",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 5,
+        "type": 1,
+        "PL": "Gate_1",
+        "DL": "Yellow_4",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 6,
+        "type": 2,
+        "PL": "Purple_4",
+        "DL": "Gate_3",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 7,
+        "type": 1,
+        "PL": "Gate_1",
+        "DL": "Orange_5",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 8,
+        "type": 1,
+        "PL": "Gate_1",
+        "DL": "Green_2",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 9,
+        "type": 2,
+        "PL": "Orange_3",
+        "DL": "Gate_3",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    },
+    {
+        "id": 10,
+        "type": 3,
+        "PL": "Green_6",
+        "DL": "Green_5",
+        "pickup_time": 3,
+        "dropoff_time": 3,
+        "deadline": 300
+    }
+]

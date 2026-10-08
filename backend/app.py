@@ -12,9 +12,24 @@ from flask import Flask, Response, request, jsonify, stream_with_context
 from flask_cors import CORS
 from waitress import serve
 from object_detection.object_detection_app import object_detection_bp
+<<<<<<< HEAD
 from scheduler.scheduler import dispatch_task, reorder_pending_tasks, robot_state, robots, update_robot_node
+=======
+from scheduler.scheduler import cancel_current_task, dispatch_task, refresh_robot_projection, robot_state, robots, update_robot_node
+from robot_config import ROBOT_HOME_NODES
+from mission_history import export_mission_history_csv, read_completed_missions, read_mission_history
+>>>>>>> aks
 from new_warehouse_map import edges, nodes
-from realtime_mqtt_gateway import start_realtime_mqtt_gateway
+from realtime_mqtt_gateway import (
+    COMMAND_PLANNER,
+    TRAFFIC_MANAGER,
+    publish_robot_command,
+    set_traffic_control_enabled,
+    start_realtime_mqtt_gateway,
+)
+from encoder_distance import is_encoder_calibrated
+from virtual_replanning import CM_PER_MAP_UNIT, LiveVirtualReplanner
+from idle_return_replanning import replan_interrupted_idle_return
 from robot_events import get_camera_url, publish_robot_state, publish_warehouse_alert, subscribe, unsubscribe
 from warehouse_tasks import create_inbound_warehouse_task, tasks
 from database.database import (
@@ -27,6 +42,7 @@ from database.database import (
     get_warehouse_monitor,
     move_inventory_item,
     remove_inventory_item,
+    rollback_scheduled_task,
 )
 from database.seed import seed_shelves
 
@@ -37,6 +53,7 @@ CORS(app)
 # The camera UI and its API now run in this same Flask application and are
 # served by the same Waitress process as the warehouse API.
 app.register_blueprint(object_detection_bp, url_prefix="/object-detection")
+VIRTUAL_REPLANNER = LiveVirtualReplanner()
 
 # Creates the local database and its storage locations.  The database module
 # remains independent from Flask, scheduler, MQTT, and robot state.
@@ -65,6 +82,9 @@ def _dispatch_warehouse_task(serial_number, task_type, pickup_location, dropoff_
         "serial_number": serial_number,
     }
     result = dispatch_task(task)
+    result["idle_return_replan"] = replan_interrupted_idle_return(
+        result, COMMAND_PLANNER, VIRTUAL_REPLANNER, publish_robot_command
+    )
     publish_robot_state(result["robot_state"])
     tasks.append(task)
     return task, result
@@ -103,6 +123,9 @@ def create_inbound_task():
     try:
         task, result, storage = create_inbound_warehouse_task(
             data.get("serial_code"), data.get("pickup_location")
+        )
+        result["idle_return_replan"] = replan_interrupted_idle_return(
+            result, COMMAND_PLANNER, VIRTUAL_REPLANNER, publish_robot_command
         )
         publish_robot_state(result["robot_state"])
     except WarehouseDatabaseError as error:
@@ -193,6 +216,86 @@ def get_robots():
     return jsonify({robot_id: robot_state(robot_id) for robot_id in robots})
 
 
+@app.route("/robots/<robot_id>/queue/reorder", methods=["POST"])
+def reorder_robot_queue(robot_id):
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+    robot = robots[robot_id]
+    current_task = robot.get("current_task")
+    if not current_task or current_task.get("status") != "TO_PICKUP" or robot.get("has_payload"):
+        return jsonify({"error": "Tasks can only be reordered while the active task is going to pickup."}), 409
+
+    data = request.get_json(silent=True) or {}
+    requested_ids = data.get("task_ids")
+    manually_moved_task_id = data.get("manually_moved_task_id")
+    queued = robot["queue"][1:]
+    queued_ids = [task["id"] for task in queued]
+    if not isinstance(requested_ids, list) or len(requested_ids) != len(queued_ids) or set(requested_ids) != set(queued_ids):
+        return jsonify({"error": "task_ids must contain each queued task exactly once."}), 400
+
+    by_id = {task["id"]: task for task in queued}
+    if manually_moved_task_id not in by_id:
+        return jsonify({"error": "manually_moved_task_id must identify a queued task."}), 400
+    new_queued = [by_id[task_id] for task_id in requested_ids]
+    for task in queued:
+        task["previous_pending_rank"] = task.get("pending_rank")
+    for position, task in enumerate(new_queued, start=1):
+        old_position = queued_ids.index(task["id"]) + 1
+        task["pending_rank"] = position
+        task["rank_delta"] = old_position - position
+        task["rank_move"] = "up" if position < old_position else "down" if position > old_position else "same"
+        if task["id"] == manually_moved_task_id:
+            task["manual_ordered"] = True
+    robot["queue"] = [robot["queue"][0], *new_queued]
+    refresh_robot_projection(robot_id)
+    return jsonify({"robot_state": robot_state(robot_id)})
+
+
+@app.route("/traffic-control", methods=["GET"])
+def get_traffic_control():
+    return jsonify({"enabled": TRAFFIC_MANAGER.enabled})
+
+
+@app.route("/traffic-control", methods=["POST"])
+def update_traffic_control():
+    data = request.get_json(silent=True) or {}
+    enabled = data.get("enabled")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "enabled must be a boolean"}), 400
+    try:
+        result = set_traffic_control_enabled(enabled)
+    except ValueError as error:
+        return jsonify({"error": str(error), "enabled": TRAFFIC_MANAGER.enabled}), 409
+    status = 503 if result["errors"] else 200
+    return jsonify(result), status
+
+
+@app.route("/robots/<robot_id>/mission-history.csv")
+def download_robot_mission_history(robot_id):
+    """Download one robot's persisted mission events, optionally for one mission ID."""
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+    mission_id = request.args.get("mission_id")
+    rows = read_mission_history(robot_id, mission_id)
+    if not rows:
+        return jsonify({"error": "No recorded mission history was found for this selection."}), 404
+    csv_text = export_mission_history_csv(robot_id, mission_id)
+    filename = f"{robot_id.lower()}_mission_history.csv"
+    return Response(
+        csv_text,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route("/robots/<robot_id>/completed-missions")
+def get_completed_missions(robot_id):
+    """List completed missions so their persisted CSV exports remain discoverable."""
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+    return jsonify({"missions": read_completed_missions(robot_id)})
+
+
 @app.route("/robots/<robot_id>/node", methods=["POST"])
 def report_robot_node(robot_id):
     """HTTP test equivalent of an MQTT node report."""
@@ -208,6 +311,7 @@ def report_robot_node(robot_id):
         return jsonify({"error": str(error)}), 400
 
 
+<<<<<<< HEAD
 @app.route("/robots/<robot_id>/queue", methods=["PUT"])
 def reorder_robot_queue(robot_id):
     """Set the order of every pending job; the active job remains fixed."""
@@ -218,6 +322,204 @@ def reorder_robot_queue(robot_id):
         return jsonify(state)
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
+=======
+@app.route("/robots/<robot_id>/cancel-preview", methods=["POST"])
+def preview_cancel_replan(robot_id):
+    """Preview a virtual-node route to the next queued task without canceling it."""
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+
+    robot = robots[robot_id]
+    current_task = robot.get("current_task")
+    if not current_task:
+        return jsonify({"error": "Robot has no active task"}), 409
+    if current_task.get("status") != "TO_PICKUP" or robot.get("has_payload"):
+        return jsonify({"error": "Replanning preview is available only during pickup"}), 409
+
+    pending_tasks = [task for task in robot["queue"] if task["id"] != current_task["id"]]
+    if not pending_tasks:
+        return jsonify({
+            "preview_only": True,
+            "next_task": None,
+            "plan": None,
+            "message": "There is no queued task to replan toward.",
+        })
+
+    edge = COMMAND_PLANNER.current_edge_for_robot(robot_id)
+    at_known_parking_start = False
+    if not edge and robot.get("last_node_update") is None:
+        # The server may have restarted while the robot was manually returned
+        # to its agreed parking pose; infer only that known initial edge.
+        edge = COMMAND_PLANNER.initial_edge_from_parking(
+            robot_id, robot["node"], current_task["PL"]
+        )
+        at_known_parking_start = edge is not None
+    if not edge:
+        return jsonify({"error": "No current RFID edge is available yet"}), 409
+    distance_cm = 0 if at_known_parking_start else robot.get("distance_since_last_node_cm")
+    if distance_cm is None:
+        return jsonify({"error": "No encoder distance is available yet"}), 409
+
+    try:
+        plan = VIRTUAL_REPLANNER.plan_from_encoder(
+            robot_id=robot_id,
+            last_node=edge["last_node"],
+            next_node=edge["next_node"],
+            distance_from_last_cm=distance_cm,
+            destination=pending_tasks[0]["PL"],
+            heading_degrees=robot.get("heading_degrees"),
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 409
+
+    return jsonify({
+        "preview_only": True,
+        "distance_is_estimate": not is_encoder_calibrated(robot_id),
+        "next_task": pending_tasks[0],
+        "plan": plan,
+        "message": "Route preview only; no task was canceled and no movement command was sent.",
+    })
+
+
+@app.route("/robots/<robot_id>/cancel", methods=["POST"])
+def cancel_and_replan(robot_id):
+    """Cancel a pre-pickup task, promote its successor, and command its replanned route."""
+    if robot_id not in robots:
+        return jsonify({"error": f"Unknown robot ID: {robot_id}"}), 404
+
+    robot = robots[robot_id]
+    current_task = robot.get("current_task")
+    if not current_task:
+        return jsonify({"error": "Robot has no active task"}), 409
+    if current_task.get("status") != "TO_PICKUP" or robot.get("has_payload"):
+        return jsonify({"error": "A task can only be canceled during pickup"}), 409
+
+    pending = [task for task in robot["queue"] if task["id"] != current_task["id"]]
+    destination = pending[0]["PL"] if pending else ROBOT_HOME_NODES[robot_id]
+
+    edge = COMMAND_PLANNER.current_edge_for_robot(robot_id)
+    at_known_parking_start = False
+    if not edge and robot.get("last_node_update") is None:
+        edge = COMMAND_PLANNER.initial_edge_from_parking(robot_id, robot["node"], destination)
+        at_known_parking_start = edge is not None
+    if not edge:
+        return jsonify({"error": "No current RFID edge is available yet"}), 409
+    if not at_known_parking_start and not is_encoder_calibrated(robot_id):
+        return jsonify({"error": "Encoder calibration is required before cancel-and-replan can move the AGV. Preview is still available."}), 409
+
+    distance_cm = 0 if at_known_parking_start else robot.get("distance_since_last_node_cm")
+    if distance_cm is None:
+        return jsonify({"error": "No encoder distance is available yet"}), 409
+    try:
+        plan = VIRTUAL_REPLANNER.plan_from_encoder(
+            robot_id, edge["last_node"], edge["next_node"], distance_cm, destination,
+            heading_degrees=robot.get("heading_degrees"),
+        )
+        if at_known_parking_start and robot["node"] == destination and distance_cm == 0:
+            # The manually established startup pose is already the requested idle location.
+            plan["first_action"] = "STOP"
+            plan["first_reentry_node"] = destination
+        if not plan.get("success") or not plan.get("first_action") or not plan.get("first_reentry_node"):
+            return jsonify({"error": "The replanner could not produce a safe first movement"}), 409
+
+        stop_command = {
+            "action": "STOP", "task": "NONE", "forklift_task": "NONE", "current_node": robot["node"],
+            "next_node": None, "goal": None, "path": [], "previous_node": edge.get("previous_node"),
+        }
+        publish_robot_command(robot_id, stop_command)
+    except (ValueError, RuntimeError) as error:
+        return jsonify({"error": str(error)}), 409
+
+    try:
+        result = cancel_current_task(
+            robot_id,
+            before_cancel=lambda task: rollback_scheduled_task(task),
+        )
+    except (ValueError, WarehouseDatabaseError) as error:
+        return jsonify({"error": str(error)}), 409
+
+    cancelled_id = result["cancelled_task"]["id"]
+    tasks[:] = [task for task in tasks if task.get("id") != cancelled_id]
+
+    next_task = result["next_task"]
+    if next_task is None:
+        if robot["node"] == destination and at_known_parking_start and distance_cm == 0:
+            robot["idle_goal"] = None
+            robot["status"] = "IDLE"
+        else:
+            robot["idle_goal"] = destination
+            robot["status"] = "RETURNING_TO_PARKING"
+        result["robot_state"] = robot_state(robot_id)
+        command = {
+            "action": plan["first_action"],
+            "task": "IDLE",
+            "forklift_task": "NONE",
+            "current_node": edge["last_node"],
+            "next_node": plan["first_reentry_node"],
+            "goal": destination,
+            "path": plan["path"],
+            "previous_node": edge.get("previous_node"),
+        }
+    else:
+        command = {
+            "action": plan["first_action"],
+            "task": "PICKUP",
+            "forklift_task": "NONE",
+            "current_node": edge["last_node"],
+            "next_node": plan["first_reentry_node"],
+            "goal": next_task["PL"],
+            "path": plan["path"],
+            "previous_node": edge.get("previous_node"),
+        }
+    robots[robot_id]["map_edge"] = (
+        {
+            "from_node": command["current_node"],
+            "to_node": command["next_node"],
+            "start_position": [coordinate / CM_PER_MAP_UNIT for coordinate in plan["state"]["current_position_cm"]],
+            "distance_origin_cm": distance_cm,
+        }
+        if command.get("next_node") in nodes
+        else None
+    )
+    robots[robot_id]["display_route"] = [
+        route_node for route_node in command.get("path", [])
+        if route_node in nodes
+    ]
+    try:
+        topic = publish_robot_command(robot_id, command)
+    except RuntimeError as error:
+        return jsonify({
+            "error": f"Task was canceled and the next task was promoted, but its command could not be sent: {error}",
+            "cancelled_task": result["cancelled_task"],
+            "next_task": next_task,
+            "robot_state": result["robot_state"],
+            "plan": plan,
+        }), 503
+
+    result["robot_state"] = robot_state(robot_id)
+    publish_robot_state(result["robot_state"])
+    if next_task is None:
+        message = (
+            f"Task canceled; the robot is returning to {destination}."
+            if topic is not None
+            else "Task canceled; the return route is waiting for a traffic reservation."
+        )
+    else:
+        message = (
+            "Task canceled; the next queued task was replanned and dispatched."
+            if topic is not None
+            else "Task canceled; the replanned task is waiting for a traffic reservation."
+        )
+    return jsonify({
+        "message": message,
+        "cancelled_task": result["cancelled_task"],
+        "next_task": next_task,
+        "robot_state": result["robot_state"],
+        "plan": plan,
+        "command": command,
+        "command_topic": topic,
+    })
+>>>>>>> aks
 
 
 @app.route("/map")

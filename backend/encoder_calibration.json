@@ -1,0 +1,15 @@
+{
+  "description": "Both robots are marked calibrated for simulation only; tick factors remain placeholders and are not measured hardware calibration values.",
+  "robots": {
+    "R1": {
+      "ticks_per_cm_left": 40,
+      "ticks_per_cm_right": 40,
+      "calibrated": true
+    },
+    "R2": {
+      "ticks_per_cm_left": 40,
+      "ticks_per_cm_right": 40,
+      "calibrated": true
+    }
+  }
+}

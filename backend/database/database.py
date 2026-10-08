@@ -295,3 +295,86 @@ def create_log(item_id: str, status: str, pickup_location: str | None, dropoff_l
             (datetime.now(timezone.utc).isoformat(), item_id, status, pickup_location, dropoff_location),
         )
         return cursor.lastrowid
+
+
+def rollback_scheduled_task(task: dict[str, object]) -> None:
+    """Undo pre-pickup inventory changes and remove the task's original log."""
+    item_id = task.get("serial_number")
+    task_type = task.get("type")
+    pickup_node = task.get("PL")
+    dropoff_node = task.get("DL")
+    if not all(isinstance(value, str) and value for value in (item_id, pickup_node, dropoff_node)):
+        raise WarehouseDatabaseError("Task is missing item or location data")
+
+    def shelf_id(node: str) -> str:
+        if "_" not in node:
+            raise WarehouseDatabaseError(f"Invalid warehouse map node '{node}'")
+        zone, number = node.split("_", maxsplit=1)
+        return f"{zone.lower()}_{number}"
+
+    source_shelf = shelf_id(pickup_node)
+    destination_shelf = shelf_id(dropoff_node)
+    log_status = {0: "IN", 1: "OUT", 2: "RELOCATION"}.get(task_type)
+    if log_status is None:
+        raise WarehouseDatabaseError(f"Unsupported task type '{task_type}'")
+
+    with _transaction() as connection:
+        if task_type == 0:
+            # Inbound work reserves its destination shelf at task creation.
+            inventory = connection.execute(
+                "SELECT shelf_id FROM INVENTORY WHERE item_id = ?", (item_id,)
+            ).fetchone()
+            if not inventory or inventory["shelf_id"] != destination_shelf:
+                raise WarehouseDatabaseError("Inbound item is no longer at its reserved shelf")
+            connection.execute("DELETE FROM INVENTORY WHERE item_id = ?", (item_id,))
+            connection.execute("UPDATE SHELF SET empty = 1 WHERE shelf_id = ?", (destination_shelf,))
+        elif task_type == 1:
+            # Outbound work removes the item from its shelf at task creation.
+            item = connection.execute(
+                "SELECT category FROM ITEM WHERE item_id = ?", (item_id,)
+            ).fetchone()
+            shelf = connection.execute(
+                "SELECT category FROM SHELF WHERE shelf_id = ?", (source_shelf,)
+            ).fetchone()
+            if not item or not shelf or item["category"] != shelf["category"]:
+                raise WarehouseDatabaseError("Cannot restore outbound item to its original shelf")
+            if connection.execute(
+                "SELECT 1 FROM INVENTORY WHERE item_id = ? OR shelf_id = ?",
+                (item_id, source_shelf),
+            ).fetchone():
+                raise WarehouseDatabaseError("Original outbound item or shelf is no longer available")
+            connection.execute(
+                "INSERT INTO INVENTORY (item_id, shelf_id) VALUES (?, ?)",
+                (item_id, source_shelf),
+            )
+            connection.execute("UPDATE SHELF SET empty = 0 WHERE shelf_id = ?", (source_shelf,))
+        else:
+            # Relocation work moves the item to its destination at task creation.
+            inventory = connection.execute(
+                "SELECT shelf_id FROM INVENTORY WHERE item_id = ?", (item_id,)
+            ).fetchone()
+            if not inventory or inventory["shelf_id"] != destination_shelf:
+                raise WarehouseDatabaseError("Relocated item is no longer at its reserved destination")
+            if connection.execute(
+                "SELECT 1 FROM INVENTORY WHERE shelf_id = ?", (source_shelf,)
+            ).fetchone():
+                raise WarehouseDatabaseError("Original relocation shelf is no longer empty")
+            connection.execute(
+                "UPDATE INVENTORY SET shelf_id = ? WHERE item_id = ?",
+                (source_shelf, item_id),
+            )
+            connection.execute("UPDATE SHELF SET empty = 0 WHERE shelf_id = ?", (source_shelf,))
+            connection.execute("UPDATE SHELF SET empty = 1 WHERE shelf_id = ?", (destination_shelf,))
+
+        connection.execute(
+            """
+            DELETE FROM LOG
+            WHERE id = (
+                SELECT id FROM LOG
+                WHERE item_id = ? AND status = ?
+                  AND pickup_location = ? AND dropoff_location = ?
+                ORDER BY id DESC LIMIT 1
+            )
+            """,
+            (item_id, log_status, pickup_node, dropoff_node),
+        )

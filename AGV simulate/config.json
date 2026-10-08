@@ -1,0 +1,28 @@
+{
+  "mqtt": {
+    "host": "localhost",
+    "port": 1883,
+    "keepalive_seconds": 60,
+    "qos": 1
+  },
+  "simulation": {
+    "speed_mps": 0.1,
+    "telemetry_interval_seconds": 0.1,
+    "initial_node_retry_seconds": 2.0,
+    "map_unit_meters": 0.0254,
+    "publish_telemetry_while_idle": true,
+    "maximum_step_seconds": 0.05
+  },
+  "robots": {
+    "R1": {
+      "start_node": "Parking_1",
+      "ticks_per_cm_left": 40,
+      "ticks_per_cm_right": 40
+    },
+    "R2": {
+      "start_node": "Parking_2",
+      "ticks_per_cm_left": 40,
+      "ticks_per_cm_right": 40
+    }
+  }
+}

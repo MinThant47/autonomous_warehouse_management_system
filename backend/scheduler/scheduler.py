@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import networkx as nx
 import numpy as np
 import joblib
@@ -183,9 +184,223 @@ def build_ranker_feature_rows(robot_name):
     fixed_prefix = []
     pending_tasks = robot["queue"]
 
+=======
+import networkx as nx
+import numpy as np
+import joblib
+import pandas as pd
+from datetime import datetime, timezone
+from encoder_distance import calculate_distance_delta_cm, is_encoder_calibrated
+from mission_history import begin_mission, record_mission_event
+from robot_config import ROBOT_HOME_NODES
+
+# 1 graph distance unit = 0.0254 meter (1 inch)
+MAP_SCALE = 0.0254
+DEFAULT_ROBOT_SPEED = 0.25333
+# -----------------------------
+
+classifier = joblib.load(
+    "models/xgb_classifier_deadline.pkl"
+)
+
+ranker = joblib.load(
+    "models/xgb_ranker.pkl"
+)
+
+# -----------------------------
+# WAREHOUSE GRAPH 
+# -----------------------------
+from new_warehouse_map import G, nodes 
+
+def heuristic(a, b):
+    x1, y1 = nodes[a]
+    x2, y2 = nodes[b]
+    return abs(x1 - x2) + abs(y1 - y2)
+
+# -----------------------------
+# ROBOTS
+# -----------------------------
+def generate_robots():
+    return {
+        "R1": {
+            "node": "Parking_1",
+            # Map coordinates use increasing Y toward the lower side of the map.
+            # The agreed startup poses are R1 facing south and R2 facing north.
+            "heading_vector": [0, 1],
+            "heading_degrees": 90.0,
+            "pending_movement": None,
+            "next_node": "Parking_1",
+            "queue": [],
+            "speed": DEFAULT_ROBOT_SPEED,
+            "status": "IDLE",
+            "waiting_for_traffic": False,
+            "idle_goal": None,
+            "map_edge": None,
+            "display_route": [],
+            "has_payload": False,
+            "last_node_update": None,
+            "last_update_source": None,
+            "encoder_telemetry": None,
+            "encoder_node_baseline_ticks": None,
+            "distance_since_last_node_cm": None,
+        },
+        "R2": {
+            "node": "Parking_2",
+            "heading_vector": [0, -1],
+            "heading_degrees": -90.0,
+            "pending_movement": None,
+            "next_node": "Parking_2",
+            "queue": [],
+            "speed": DEFAULT_ROBOT_SPEED,
+            "status": "IDLE",
+            "waiting_for_traffic": False,
+            "idle_goal": None,
+            "map_edge": None,
+            "display_route": [],
+            "has_payload": False,
+            "last_node_update": None,
+            "last_update_source": None,
+            "encoder_telemetry": None,
+            "encoder_node_baseline_ticks": None,
+            "distance_since_last_node_cm": None,
+        }
+    }
+
+def get_classifier_feature_names(model):
+
+    if hasattr(model, "feature_names_in_"):
+        return list(model.feature_names_in_)
+
+    booster = model.get_booster()
+
+    if booster.feature_names:
+        return list(booster.feature_names)
+
+    raise RuntimeError("Classifier feature names not found.")
+
+CLASSIFIER_COLUMNS = get_classifier_feature_names(classifier)
+
+# Adds missing feature columns with zero values and returns only the required model features in the correct order.
+
+def select_model_features(df, feature_columns):
+
+    for column in feature_columns:
+        if column not in df.columns:
+            df[column] = 0
+
+    return df[feature_columns]
+
+def graph_distance_m(start_node, end_node):
+    return (
+        nx.astar_path_length(
+            G,
+            start_node,
+            end_node,
+            heuristic=heuristic,
+            weight="weight"
+        )
+        * MAP_SCALE
+    )
+
+def graph_travel_time_s(start_node, end_node, speed=DEFAULT_ROBOT_SPEED):
+    return graph_distance_m(start_node, end_node) / speed
+
+
+def build_classifier_features(task, robot_state):
+
+    r1_next = robot_state["R1"]["next_node"]
+    r2_next = robot_state["R2"]["next_node"]
+
+    r1x, r1y = nodes[r1_next]
+    r2x, r2y = nodes[r2_next]
+
+    plx, ply = nodes[task["PL"]]
+    dlx, dly = nodes[task["DL"]]
+
+    r1_dist = (
+        nx.astar_path_length(
+            G,
+            r1_next,
+            task["PL"],
+            heuristic=heuristic,
+            weight="weight"
+        )
+        * MAP_SCALE
+    )
+
+    r2_dist = (
+        nx.astar_path_length(
+            G,
+            r2_next,
+            task["PL"],
+            heuristic=heuristic,
+            weight="weight"
+        )
+        * MAP_SCALE
+    )
+
+    task_dist = (
+        nx.astar_path_length(
+            G,
+            task["PL"],
+            task["DL"],
+            heuristic=heuristic,
+            weight="weight"
+        )
+        * MAP_SCALE
+    )
+
+    row = {
+
+        "r1_next_x": round(r1x * MAP_SCALE, 4),
+        "r1_next_y": round(r1y * MAP_SCALE, 4),
+        "r1_tuf": round(robot_state["R1"]["real_time_until_free"], 2),
+
+        "r2_next_x": round(r2x * MAP_SCALE, 4),
+        "r2_next_y": round(r2y * MAP_SCALE, 4),
+        "r2_tuf": round(robot_state["R2"]["real_time_until_free"], 2),
+
+        "r1_queue_length": robot_state["R1"]["queue_length"],
+        "r2_queue_length": robot_state["R2"]["queue_length"],
+
+        "tuf_difference": round(
+            robot_state["R1"]["real_time_until_free"]
+            - robot_state["R2"]["real_time_until_free"],
+            2
+        ),
+
+        "task_pl_x": round(plx * MAP_SCALE, 4),
+        "task_pl_y": round(ply * MAP_SCALE, 4),
+        "task_dl_x": round(dlx * MAP_SCALE, 4),
+        "task_dl_y": round(dly * MAP_SCALE, 4),
+
+        "r1_dist_to_pickup": round(r1_dist, 4),
+        "r2_dist_to_pickup": round(r2_dist, 4),
+
+        "task_dist_to_dropoff": round(task_dist, 4),
+
+        "task_type": task["type"],
+        "deadline": task["deadline"],
+    }
+
+    df = pd.DataFrame([row])
+    return select_model_features(df, CLASSIFIER_COLUMNS)
+
+def build_ranker_feature_rows(robot_name):
+
+    robot = robots[robot_name]
+
+    fixed_prefix = []
+    pending_tasks = robot["queue"]
+
+>>>>>>> aks
     if "current_task" in robot and robot["queue"]:
         fixed_prefix = [robot["queue"][0]]
         pending_tasks = robot["queue"][1:]
+
+    # User-positioned tasks keep their slots when new work is automatically
+    # ranked; the ranker only compares tasks the user has not pinned.
+    pending_tasks = [task for task in pending_tasks if not task.get("manual_ordered")]
 
     if len(pending_tasks) <= 1:
         return pd.DataFrame()
@@ -576,6 +791,7 @@ def rerank_robot_queue(robot_name):
         fixed_prefix = [robot["queue"][0]]
         pending_tasks = robot["queue"][1:]
 
+<<<<<<< HEAD
     # A UI reorder takes precedence over the learned ranker until the queue
     # drains. New work is appended, and the chosen order is retained.
     if robot.get("manual_queue_order"):
@@ -589,6 +805,9 @@ def rerank_robot_queue(robot_name):
         update_current_task_remaining_time(robot_name)
         robot["next_node"] = robot["queue"][-1]["DL"] if robot["queue"] else robot["node"]
         return
+=======
+    pending_tasks = [task for task in pending_tasks if not task.get("manual_ordered")]
+>>>>>>> aks
 
     before_pending_positions = {
         task["id"]: position
@@ -714,7 +933,12 @@ def rerank_robot_queue(robot_name):
         ascending=False
     )
 
-    robot["queue"] = fixed_prefix + list(df["task"])
+    ranked_tasks = iter(list(df["task"]))
+    ranked_ids = {task["id"] for task in pending_tasks}
+    robot["queue"] = fixed_prefix + [
+        next(ranked_tasks) if task["id"] in ranked_ids else task
+        for task in robot["queue"][len(fixed_prefix):]
+    ]
 
     for rank, task in enumerate(robot["queue"], start=1):
         task["sequence_rank"] = rank
@@ -769,6 +993,7 @@ def get_ranker_feature_names(model):
 RANKER_COLUMNS = get_ranker_feature_names(ranker)
 
 def dispatch_task(task):
+<<<<<<< HEAD
     """Assign one server task and rerank the selected robot's pending queue.
 
     ``task`` must contain: id, type, PL, DL, pickup_time, dropoff_time, deadline.
@@ -1111,3 +1336,568 @@ def refresh_robot_projection(robot_name):
     robot["next_node"] = robot["queue"][-1]["DL"] if robot["queue"] else robot["node"]
     for task in robot["queue"]:
         task["estimated_remaining_seconds"] = evaluate_fixed_robot_queue(robot_name)
+=======
+    """Assign one server task and rerank the selected robot's pending queue.
+
+    ``task`` must contain: id, type, PL, DL, pickup_time, dropoff_time, deadline.
+    PL/DL must be node names in ``new_warehouse_map.G``.
+    """
+    validate_task(task)
+    features = build_classifier_features(task, snapshot_robot_state())
+    prediction = classifier.predict(features)[0]
+    robot_name = "R1" if prediction == 0 else "R2"
+    robot = robots[robot_name]
+    interrupted_idle_return = robot.get("idle_goal") is not None
+    started_from_home = (
+        not robot["queue"]
+        and not interrupted_idle_return
+        and robot["node"] == ROBOT_HOME_NODES[robot_name]
+    )
+    # New work takes precedence over a previous idle return route.
+    robot["idle_goal"] = None
+    robot_was_free = not robot["queue"]
+
+    task = dict(task)  # do not mutate the server request object
+    task["assigned_robot"] = robot_name
+    task["status"] = "QUEUED"
+    robot["queue"].append(task)
+
+    # The first task is fixed once the robot is available to execute it.
+    # ``rerank_robot_queue`` already treats this fixed head separately, so only
+    # later queued tasks may be reordered by the ranker.
+    if robot_was_free:
+        # A completed/canceled idle-return route may still be cached here (for
+        # example, a one-node route to Parking_1). Let robot_state() derive the
+        # newly active task's route until any encoder-based interruption plan
+        # installs its more accurate route.
+        robot["display_route"] = []
+        start_next_task(robot_name)
+
+    rerank_robot_queue(robot_name)
+    refresh_robot_projection(robot_name)
+
+    return {
+        "assigned_robot": robot_name,
+        "interrupted_idle_return": interrupted_idle_return,
+        "started_from_home": started_from_home,
+        "queue": task_queue(robot_name),
+        "robot_state": robot_state(robot_name),
+    }
+    
+# -----------------------------
+# TA COST (SYNCED)
+# -----------------------------
+# -----------------------------
+# REAL PHYSICAL TIME
+# -----------------------------
+
+def compute_travel_time(
+    start_node,
+    end_node,
+    speed,
+    G,
+    MAP_SCALE
+):
+
+    dist = nx.astar_path_length(
+        G,
+        start_node,
+        end_node,
+        heuristic=heuristic,
+        weight="weight"
+    )
+
+    dist_m = dist * MAP_SCALE
+
+    return dist_m / speed
+
+def compute_task_time_seconds_from_node(start_node, robot, task):
+
+    d1 = nx.astar_path_length(
+        G,
+        start_node,
+        task["PL"],
+        heuristic=heuristic,
+        weight="weight"
+    )
+
+    d2 = nx.astar_path_length(
+        G,
+        task["PL"],
+        task["DL"],
+        heuristic=heuristic,
+        weight="weight"
+    )
+
+    return (
+        ((d1 + d2) * MAP_SCALE)
+        / robot["speed"]
+        + task["pickup_time"]
+        + task["dropoff_time"]
+    )
+
+
+def compute_current_task_remaining_time(robot):
+
+    if "current_task" not in robot:
+        return 0.0
+
+    task = robot["current_task"]
+    # The WMS reports the current phase and node; service time is included
+    # only while the robot reports that it is at the relevant station.
+    wait_time = 0.0
+
+    if robot["has_payload"]:
+
+        if robot["node"] == task["DL"]:
+            return wait_time
+
+        return (
+            wait_time
+            + graph_travel_time_s(
+                robot["node"],
+                task["DL"],
+                robot["speed"]
+            )
+            + task["dropoff_time"]
+        )
+
+    if robot["node"] == task["PL"]:
+
+        return (
+            wait_time
+            + task["pickup_time"]
+            + graph_travel_time_s(
+                task["PL"],
+                task["DL"],
+                robot["speed"]
+            )
+            + task["dropoff_time"]
+        )
+
+    return (
+        wait_time
+        + compute_task_time_seconds_from_node(
+            robot["node"],
+            robot,
+            task
+        )
+    )
+
+
+def evaluate_fixed_robot_queue(robot_name):
+
+    robot = robots[robot_name]
+
+    if not robot["queue"]:
+        return 0.0
+
+    total_time = 0.0
+    next_start_node = robot["node"]
+
+    for queue_index, task in enumerate(robot["queue"]):
+        is_current_task = (
+            queue_index == 0
+            and "current_task" in robot
+            and task["id"] == robot["current_task"]["id"]
+        )
+
+        if is_current_task:
+            task_time = compute_current_task_remaining_time(robot)
+        else:
+            task_time = compute_task_time_seconds_from_node(
+                next_start_node,
+                robot,
+                task
+            )
+
+        total_time += task_time
+        next_start_node = task["DL"]
+
+    return total_time
+
+
+def snapshot_robot_state():
+
+    return {
+        robot_name: {
+            "next_node": robot["queue"][-1]["DL"] if robot["queue"] else robot["node"],
+            "real_time_until_free": evaluate_fixed_robot_queue(robot_name),
+            "queue_length": len(robot["queue"])
+        }
+        for robot_name, robot in robots.items()
+    }
+
+
+def encode_robot_label(robot_name):
+
+    return {
+        "R1": 0,
+        "R2": 1
+    }[robot_name]
+
+
+# ---------------------------------------------------------------------------
+# WMS / ROBOT INTEGRATION API
+# ---------------------------------------------------------------------------
+robots = generate_robots()
+
+
+def update_current_task_remaining_time(robot_name):
+    """Update in-memory projected remaining time; no simulation database is used."""
+    robot = robots[robot_name]
+    if not robot["queue"]:
+        return 0.0
+    remaining = evaluate_fixed_robot_queue(robot_name)
+    robot["queue"][0]["estimated_remaining_seconds"] = remaining
+    return remaining
+
+
+def validate_task(task):
+    required = {"id", "type", "PL", "DL", "pickup_time", "dropoff_time", "deadline"}
+    missing = required - set(task)
+    if missing:
+        raise ValueError(f"Task is missing required fields: {sorted(missing)}")
+    unknown_nodes = {task["PL"], task["DL"]} - set(G.nodes)
+    if unknown_nodes:
+        raise ValueError(f"Task contains unknown map nodes: {sorted(unknown_nodes)}")
+
+def task_queue(robot_name):
+    """Return the current queue in dispatch order, safe to serialize as JSON."""
+    return [dict(task) for task in robots[robot_name]["queue"]]
+
+
+def robot_state(robot_name):
+    """Return the scheduler state that should be exposed to the WMS."""
+    robot = robots[robot_name]
+    map_edge = robot.get("map_edge")
+    map_position = list(nodes[robot["node"]])
+    distance_cm = robot.get("distance_since_last_node_cm")
+    if map_edge and distance_cm is not None:
+        start = map_edge.get("start_position") or nodes.get(map_edge.get("from_node"))
+        end = map_edge.get("end_position") or nodes.get(map_edge.get("to_node"))
+        if start and end and map_edge.get("from_node") == robot["node"]:
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            edge_length_cm = (abs(dx) + abs(dy)) * MAP_SCALE * 100
+            if edge_length_cm > 0:
+                distance_origin_cm = float(map_edge.get("distance_origin_cm", 0.0))
+                progress_since_edge_start = max(float(distance_cm) - distance_origin_cm, 0.0)
+                progress = min(progress_since_edge_start, edge_length_cm)
+                fraction = progress / edge_length_cm
+                map_position = [start[0] + dx * fraction, start[1] + dy * fraction]
+    display_route = list(robot.get("display_route", []))
+    if not display_route:
+        current_task = robot.get("current_task")
+        if current_task:
+            goal = current_task["DL"] if current_task.get("status") == "TO_DROPOFF" else current_task["PL"]
+        else:
+            goal = robot.get("idle_goal")
+        if goal in nodes and robot["node"] in nodes:
+            try:
+                planned_path = nx.astar_path(G, robot["node"], goal, heuristic=heuristic, weight="weight")
+                display_route = planned_path[1:]
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                display_route = []
+    return {
+        "robot_id": robot_name,
+        "node": robot["node"],
+        "heading_vector": list(robot["heading_vector"]),
+        "heading_degrees": round(float(robot["heading_degrees"]), 1),
+        "heading_label": _heading_label(robot["heading_vector"]),
+        "map_position": map_position,
+        "map_edge": dict(map_edge) if map_edge else None,
+        "display_route": display_route,
+        "status": robot["status"],
+        "waiting_for_traffic": robot.get("waiting_for_traffic", False),
+        "has_payload": robot["has_payload"],
+        "speed_mps": robot["speed"],
+        "current_task_id": robot.get("current_task", {}).get("id"),
+        "idle_goal": robot.get("idle_goal"),
+        "queue_length": len(robot["queue"]),
+        "estimated_seconds_until_free": evaluate_fixed_robot_queue(robot_name),
+        "last_node_update": robot["last_node_update"],
+        "last_update_source": robot["last_update_source"],
+        "encoder_telemetry": dict(robot["encoder_telemetry"]) if robot["encoder_telemetry"] else None,
+        "distance_since_last_node_cm": robot["distance_since_last_node_cm"],
+        "encoder_distance_calibrated": is_encoder_calibrated(robot_name),
+        "queue": task_queue(robot_name),
+    }
+
+
+def _heading_label(vector):
+    """Describe facing using warehouse-map axes (map +Y is south)."""
+    dx, dy = vector
+    labels = {(1, 0): "East", (-1, 0): "West", (0, 1): "South", (0, -1): "North"}
+    return labels.get((dx, dy), "Diagonal")
+
+
+def record_robot_command(robot_name, command):
+    """Remember the last successfully published move until its RFID arrival."""
+    if robot_name not in robots:
+        raise ValueError(f"Unknown robot ID: {robot_name}")
+    next_node = command.get("next_node")
+    action = str(command.get("action", "STOP")).upper()
+    robots[robot_name]["pending_movement"] = (
+        {
+            "action": action,
+            "current_node": command.get("current_node"),
+            "next_node": next_node,
+        }
+        if isinstance(next_node, str) and next_node != command.get("current_node") and action != "STOP"
+        else None
+    )
+
+
+def _confirm_heading_at_node(robot, node_id):
+    """Update facing only after the commanded next RFID node is reported."""
+    pending = robot.get("pending_movement")
+    if not pending:
+        return
+    if node_id == pending.get("current_node"):
+        return  # Duplicate report for the node from which the move was sent.
+    robot["pending_movement"] = None
+    if node_id != pending.get("next_node"):
+        return  # Unexpected RFID: retain last known facing rather than guess.
+    start = nodes.get(pending.get("current_node"))
+    end = nodes.get(node_id)
+    if start is None or end is None:
+        return
+    dx = 1 if end[0] > start[0] else -1 if end[0] < start[0] else 0
+    dy = 1 if end[1] > start[1] else -1 if end[1] < start[1] else 0
+    if pending.get("action") in {"BACK", "BACKWARD"}:
+        return  # Reverse travel changes position, not the AGV's front-facing heading.
+    # A TURN_BACK command rotates the AGV at an intersection before it drives
+    # forward to the commanded next node, so confirmed arrival faces that edge.
+    if dx or dy:
+        robot["heading_vector"] = [dx, dy]
+        robot["heading_degrees"] = float(np.degrees(np.arctan2(dy, dx)))
+
+
+def update_robot_encoder_telemetry(robot_name, ticks_left, ticks_right):
+    """Store raw counters and accumulate calibrated distance since the last RFID node."""
+    if robot_name not in robots:
+        raise ValueError(f"Unknown robot ID: {robot_name}")
+    if isinstance(ticks_left, bool) or not isinstance(ticks_left, int):
+        raise ValueError("ticks_L must be an integer")
+    if isinstance(ticks_right, bool) or not isinstance(ticks_right, int):
+        raise ValueError("ticks_R must be an integer")
+
+    robot = robots[robot_name]
+    baseline = robot["encoder_node_baseline_ticks"]
+    if baseline is None:
+        baseline = {"ticks_L": ticks_left, "ticks_R": ticks_right}
+        robot["encoder_node_baseline_ticks"] = baseline
+    tick_delta_left = ticks_left - baseline["ticks_L"]
+    tick_delta_right = ticks_right - baseline["ticks_R"]
+    if tick_delta_left < 0 or tick_delta_right < 0:
+        # Current firmware counters are expected to be cumulative and increasing.
+        # A reset/rollback makes this segment's distance unreliable until a new RFID node.
+        robot["distance_since_last_node_cm"] = None
+        distance_since_node_cm = None
+    else:
+        distance_since_node_cm = calculate_distance_delta_cm(
+            robot_name, tick_delta_left, tick_delta_right
+        )
+        robot["distance_since_last_node_cm"] = distance_since_node_cm
+
+    robot["encoder_telemetry"] = {
+        "ticks_L": ticks_left,
+        "ticks_R": ticks_right,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+        "distance_since_last_node_cm": distance_since_node_cm,
+        "distance_calibrated": is_encoder_calibrated(robot_name),
+    }
+    record_mission_event(
+        robot_name,
+        robot.get("current_task"),
+        "encoder_reading",
+        node=robot.get("node"),
+        source="mqtt-telemetry",
+        ticks_left=ticks_left,
+        ticks_right=ticks_right,
+        distance_cm=distance_since_node_cm,
+        calibrated=is_encoder_calibrated(robot_name),
+    )
+    return robot_state(robot_name)
+
+
+def update_robot_node(robot_name, node_id, source="mqtt"):
+    """Record a robot's reported map node and refresh its XGBoost inputs.
+
+    The physical robot only needs to report a node name from ``new_warehouse_map``.
+    Task routing remains external. With node-only reports, reaching the task's
+    pickup is treated as pickup complete and reaching its dropoff as complete.
+    """
+    if robot_name not in robots:
+        raise ValueError(f"Unknown robot ID: {robot_name}")
+    if node_id not in G.nodes:
+        raise ValueError(f"Unknown map node: {node_id}")
+
+    robot = robots[robot_name]
+    _confirm_heading_at_node(robot, node_id)
+    robot["node"] = node_id
+    # An RFID report anchors the marker at this node until the next route edge is issued.
+    robot["map_edge"] = None
+    robot["display_route"] = []
+    robot["last_node_update"] = datetime.now(timezone.utc).isoformat()
+    robot["last_update_source"] = source
+    latest_encoder = robot.get("encoder_telemetry")
+    if latest_encoder:
+        robot["encoder_node_baseline_ticks"] = {
+            "ticks_L": latest_encoder["ticks_L"],
+            "ticks_R": latest_encoder["ticks_R"],
+        }
+    robot["distance_since_last_node_cm"] = calculate_distance_delta_cm(robot_name, 0, 0)
+    if latest_encoder:
+        latest_encoder["distance_since_last_node_cm"] = robot["distance_since_last_node_cm"]
+
+    active_task = robot.get("current_task")
+    record_mission_event(
+        robot_name,
+        active_task,
+        "rfid_detected",
+        node=node_id,
+        source=source,
+        ticks_left=latest_encoder.get("ticks_L") if latest_encoder else None,
+        ticks_right=latest_encoder.get("ticks_R") if latest_encoder else None,
+        distance_cm=robot["distance_since_last_node_cm"],
+        calibrated=is_encoder_calibrated(robot_name),
+    )
+
+    current_task = robot.get("current_task")
+    if current_task and current_task["status"] == "TO_PICKUP" and node_id == current_task["PL"]:
+        current_task["status"] = "TO_DROPOFF"
+        robot["has_payload"] = True
+        robot["status"] = "TO_DROPOFF"
+        record_mission_event(
+            robot_name, current_task, "pickup_reached", node=node_id, source=source,
+            ticks_left=latest_encoder.get("ticks_L") if latest_encoder else None,
+            ticks_right=latest_encoder.get("ticks_R") if latest_encoder else None,
+            distance_cm=robot["distance_since_last_node_cm"],
+            calibrated=is_encoder_calibrated(robot_name),
+        )
+    elif current_task and current_task["status"] == "TO_DROPOFF" and node_id == current_task["DL"]:
+        complete_current_task(robot_name)
+    elif current_task:
+        robot["status"] = current_task["status"]
+    else:
+        idle_goal = robot.get("idle_goal")
+        if idle_goal and node_id == idle_goal:
+            robot["idle_goal"] = None
+            robot["status"] = "IDLE"
+        elif idle_goal:
+            robot["status"] = "RETURNING_TO_PARKING"
+        else:
+            robot["status"] = "IDLE"
+
+    refresh_robot_projection(robot_name)
+    return robot_state(robot_name)
+
+
+def start_next_task(robot_name):
+    """Make the queue head active without allowing the ranker to move it."""
+    robot = robots[robot_name]
+    if not robot["queue"]:
+        robot.pop("current_task", None)
+        robot["status"] = "IDLE"
+        robot["has_payload"] = False
+        return None
+
+    task = robot["queue"][0]
+    task["status"] = "TO_PICKUP"
+    task["sequence_rank"] = 1
+    task["pending_rank"] = None
+    robot["current_task"] = task
+    robot["status"] = "TO_PICKUP"
+    robot["has_payload"] = False
+    begin_mission(robot_name, task, robot["node"])
+    return task
+
+
+def complete_current_task(robot_name):
+    """Remove the completed fixed task and activate the next ranked task."""
+    robot = robots[robot_name]
+    current_task = robot.get("current_task")
+    if not current_task:
+        return None
+
+    current_task["status"] = "COMPLETED"
+    record_mission_event(
+        robot_name,
+        current_task,
+        "mission_completed",
+        node=robot["node"],
+        source=robot.get("last_update_source"),
+        ticks_left=(robot.get("encoder_telemetry") or {}).get("ticks_L"),
+        ticks_right=(robot.get("encoder_telemetry") or {}).get("ticks_R"),
+        distance_cm=robot.get("distance_since_last_node_cm"),
+        calibrated=is_encoder_calibrated(robot_name),
+    )
+    if robot["queue"] and robot["queue"][0]["id"] == current_task["id"]:
+        robot["queue"].pop(0)
+    else:
+        robot["queue"] = [task for task in robot["queue"] if task["id"] != current_task["id"]]
+    robot.pop("current_task", None)
+    robot["has_payload"] = False
+    next_task = start_next_task(robot_name)
+    if next_task is None:
+        home_node = ROBOT_HOME_NODES[robot_name]
+        if robot["node"] == home_node:
+            robot["idle_goal"] = None
+            robot["status"] = "IDLE"
+        else:
+            robot["idle_goal"] = home_node
+            robot["status"] = "RETURNING_TO_PARKING"
+    rerank_robot_queue(robot_name)
+    return current_task
+
+
+def cancel_current_task(robot_name, before_cancel=None):
+    """Cancel an active task before pickup, then activate the next queued task."""
+    if robot_name not in robots:
+        raise ValueError(f"Unknown robot ID: {robot_name}")
+
+    robot = robots[robot_name]
+    current_task = robot.get("current_task")
+    if not current_task:
+        raise ValueError(f"Robot '{robot_name}' has no active task to cancel")
+    if current_task.get("status") != "TO_PICKUP" or robot.get("has_payload"):
+        raise ValueError("A task can only be canceled before the robot picks up its item")
+
+    cancelled_task = dict(current_task)
+    if before_cancel:
+        before_cancel(cancelled_task)
+
+    current_task["status"] = "CANCELED"
+    record_mission_event(
+        robot_name,
+        current_task,
+        "mission_canceled",
+        node=robot["node"],
+        source=robot.get("last_update_source"),
+        ticks_left=(robot.get("encoder_telemetry") or {}).get("ticks_L"),
+        ticks_right=(robot.get("encoder_telemetry") or {}).get("ticks_R"),
+        distance_cm=robot.get("distance_since_last_node_cm"),
+        calibrated=is_encoder_calibrated(robot_name),
+    )
+    robot["queue"] = [task for task in robot["queue"] if task["id"] != current_task["id"]]
+    robot.pop("current_task", None)
+    robot["has_payload"] = False
+    start_next_task(robot_name)
+    rerank_robot_queue(robot_name)
+    refresh_robot_projection(robot_name)
+
+    return {
+        "cancelled_task": cancelled_task,
+        "next_task": dict(robot["current_task"]) if robot.get("current_task") else None,
+        "robot_state": robot_state(robot_name),
+    }
+
+
+def refresh_robot_projection(robot_name):
+    """Recalculate the queue's projected tail node and completion time."""
+    robot = robots[robot_name]
+    robot["next_node"] = robot["queue"][-1]["DL"] if robot["queue"] else robot["node"]
+    for task in robot["queue"]:
+        task["estimated_remaining_seconds"] = evaluate_fixed_robot_queue(robot_name)
+>>>>>>> aks
