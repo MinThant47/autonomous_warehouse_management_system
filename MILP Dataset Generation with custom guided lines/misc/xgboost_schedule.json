@@ -1,0 +1,111 @@
+{
+    "R1": [
+        {
+            "task_id": 1,
+            "priority": 1,
+            "pickup": "Yellow_1",
+            "dropoff": "Gate_4",
+            "deadline": 10
+        },
+        {
+            "task_id": 3,
+            "priority": 2,
+            "pickup": "Yellow_3",
+            "dropoff": "Orange_2",
+            "deadline": 10
+        },
+        {
+            "task_id": 5,
+            "priority": 3,
+            "pickup": "Yellow_1",
+            "dropoff": "Gate_3",
+            "deadline": 20
+        },
+        {
+            "task_id": 7,
+            "priority": 4,
+            "pickup": "Purple_4",
+            "dropoff": "Gate_3",
+            "deadline": 30
+        },
+        {
+            "task_id": 9,
+            "priority": 5,
+            "pickup": "Gate_2",
+            "dropoff": "Yellow_4",
+            "deadline": 10
+        },
+        {
+            "task_id": 10,
+            "priority": 6,
+            "pickup": "Gate_2",
+            "dropoff": "Green_2",
+            "deadline": 50
+        },
+        {
+            "task_id": 12,
+            "priority": 7,
+            "pickup": "Green_3",
+            "dropoff": "Gate_3",
+            "deadline": 20
+        },
+        {
+            "task_id": 14,
+            "priority": 8,
+            "pickup": "Yellow_2",
+            "dropoff": "Gate_3",
+            "deadline": 10
+        }
+    ],
+    "R2": [
+        {
+            "task_id": 2,
+            "priority": 1,
+            "pickup": "Gate_1",
+            "dropoff": "Orange_5",
+            "deadline": 20
+        },
+        {
+            "task_id": 4,
+            "priority": 2,
+            "pickup": "Gate_1",
+            "dropoff": "Purple_2",
+            "deadline": 5
+        },
+        {
+            "task_id": 6,
+            "priority": 3,
+            "pickup": "Orange_1",
+            "dropoff": "Gate_4",
+            "deadline": 50
+        },
+        {
+            "task_id": 8,
+            "priority": 4,
+            "pickup": "Green_1",
+            "dropoff": "Gate_4",
+            "deadline": 20
+        },
+        {
+            "task_id": 11,
+            "priority": 5,
+            "pickup": "Gate_1",
+            "dropoff": "Orange_7",
+            "deadline": 10
+        },
+        {
+            "task_id": 13,
+            "priority": 6,
+            "pickup": "Gate_2",
+            "dropoff": "Orange_2",
+            "deadline": 50
+        },
+        {
+            "task_id": 15,
+            "priority": 7,
+            "pickup": "Purple_3",
+            "dropoff": "Yellow_4",
+            "deadline": 30
+        }
+    ]
+}

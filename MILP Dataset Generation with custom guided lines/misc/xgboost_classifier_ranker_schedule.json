@@ -1,0 +1,141 @@
+{
+    "R1": [
+        {
+            "task_id": 14,
+            "sequence_rank": 1,
+            "ranker_position": 1,
+            "ranker_score": 3.881186008453369,
+            "pickup": "Yellow_2",
+            "dropoff": "Gate_3",
+            "deadline": 10
+        },
+        {
+            "task_id": 5,
+            "sequence_rank": 2,
+            "ranker_position": 2,
+            "ranker_score": 3.5747597217559814,
+            "pickup": "Yellow_1",
+            "dropoff": "Gate_3",
+            "deadline": 20
+        },
+        {
+            "task_id": 1,
+            "sequence_rank": 3,
+            "ranker_position": 3,
+            "ranker_score": 1.8572112321853638,
+            "pickup": "Yellow_1",
+            "dropoff": "Gate_4",
+            "deadline": 10
+        },
+        {
+            "task_id": 15,
+            "sequence_rank": 4,
+            "ranker_position": 4,
+            "ranker_score": 0.6972119212150574,
+            "pickup": "Purple_3",
+            "dropoff": "Yellow_4",
+            "deadline": 30
+        },
+        {
+            "task_id": 8,
+            "sequence_rank": 5,
+            "ranker_position": 5,
+            "ranker_score": 0.11051443964242935,
+            "pickup": "Green_1",
+            "dropoff": "Gate_4",
+            "deadline": 20
+        },
+        {
+            "task_id": 10,
+            "sequence_rank": 6,
+            "ranker_position": 6,
+            "ranker_score": -0.149466872215271,
+            "pickup": "Gate_2",
+            "dropoff": "Green_2",
+            "deadline": 50
+        },
+        {
+            "task_id": 12,
+            "sequence_rank": 7,
+            "ranker_position": 7,
+            "ranker_score": -0.22285926342010498,
+            "pickup": "Green_3",
+            "dropoff": "Gate_3",
+            "deadline": 20
+        },
+        {
+            "task_id": 3,
+            "sequence_rank": 8,
+            "ranker_position": 8,
+            "ranker_score": -1.7294918298721313,
+            "pickup": "Yellow_3",
+            "dropoff": "Orange_2",
+            "deadline": 10
+        }
+    ],
+    "R2": [
+        {
+            "task_id": 6,
+            "sequence_rank": 1,
+            "ranker_position": 1,
+            "ranker_score": 5.550661563873291,
+            "pickup": "Orange_1",
+            "dropoff": "Gate_4",
+            "deadline": 50
+        },
+        {
+            "task_id": 7,
+            "sequence_rank": 2,
+            "ranker_position": 2,
+            "ranker_score": 2.96905255317688,
+            "pickup": "Purple_4",
+            "dropoff": "Gate_3",
+            "deadline": 30
+        },
+        {
+            "task_id": 9,
+            "sequence_rank": 3,
+            "ranker_position": 3,
+            "ranker_score": 1.1348711252212524,
+            "pickup": "Gate_2",
+            "dropoff": "Yellow_4",
+            "deadline": 10
+        },
+        {
+            "task_id": 4,
+            "sequence_rank": 4,
+            "ranker_position": 4,
+            "ranker_score": -1.2507401704788208,
+            "pickup": "Gate_1",
+            "dropoff": "Purple_2",
+            "deadline": 5
+        },
+        {
+            "task_id": 13,
+            "sequence_rank": 5,
+            "ranker_position": 5,
+            "ranker_score": -1.6969473361968994,
+            "pickup": "Gate_2",
+            "dropoff": "Orange_2",
+            "deadline": 50
+        },
+        {
+            "task_id": 2,
+            "sequence_rank": 6,
+            "ranker_position": 6,
+            "ranker_score": -2.0495662689208984,
+            "pickup": "Gate_1",
+            "dropoff": "Orange_5",
+            "deadline": 20
+        },
+        {
+            "task_id": 11,
+            "sequence_rank": 7,
+            "ranker_position": 7,
+            "ranker_score": -2.1299619674682617,
+            "pickup": "Gate_1",
+            "dropoff": "Orange_7",
+            "deadline": 10
+        }
+    ]
+}
